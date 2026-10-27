@@ -1,5 +1,5 @@
 """
-Orchestrator v0.8 (phrase plan) (rule-based planner) for the 'chamber_mini' ensemble.
+Orchestrator v0.9 (skyline melody) (rule-based planner) for the 'chamber_mini' ensemble.
 Pipeline: piano MIDI/MusicXML -> analysis -> plan -> realization -> validation.
 v0.5: harmony is read per beat (works for broken-chord accompaniments), bass/inner voices are
 sustained, 4-bar sections with a constant set of instruments, smoothed dynamics, per-instrument
@@ -7,8 +7,7 @@ loudness balancing measured on isolated renders, transposed MusicXML, MIDI at so
 """
 import sys, json, copy, warnings, bisect, os, subprocess, tempfile
 warnings.filterwarnings("ignore")
-HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
+sys.path.insert(0, "/mnt/user-data/outputs")
 from music21 import converter, stream, note, chord, instrument, meter, dynamics, tempo, volume
 import validator
 
@@ -26,8 +25,7 @@ WINDS = {"Flute", "Oboe", "Clarinet", "Bassoon", "Horn"}
 MAX_WIND_RUN_BEATS = validator.MAX_WIND_RUN_BEATS
 LEVELS = ["mp", "mf", "f"]
 PHRASE_BARS = 4
-from audio_tools import find_soundfont, find_fluidsynth
-SF2 = find_soundfont()
+SF2 = "/usr/share/sounds/sf2/FluidR3_GM.sf2"
 
 def fit(m, name):
     lo, hi = RANGES[KEY[name]]
@@ -65,11 +63,13 @@ def analyze(path):
     by_part = {}
     for n in allnotes: by_part.setdefault(n[3], []).append(n[2])
     top_pi = max(by_part, key=lambda k: sum(by_part[k]) / len(by_part[k]))
-    melody = []
-    for el in s.parts[top_pi].flatten().notes:
-        if el.quarterLength <= 0: continue
-        top = max(x.midi for x in el.pitches) if isinstance(el, chord.Chord) else el.pitch.midi
-        melody.append({"offset": float(el.offset), "dur": float(el.quarterLength), "pitch": top})
+    # melody = top line across ALL piano tracks (the line can move between the right- and left-hand tracks)
+    sky = {}
+    for on, off_, midi, pi in allnotes:
+        cur = sky.get(on)
+        if cur is None or midi > cur[0]:
+            sky[on] = (midi, off_ - on)
+    melody = [{"offset": on, "dur": dur, "pitch": midi} for on, (midi, dur) in sorted(sky.items())]
     mel_on = [m["offset"] for m in melody]
     def melody_at(b):
         i = bisect.bisect_right(mel_on, b + 0.999) - 1
@@ -255,6 +255,45 @@ def enforce_breath(lines, meta, log):
             lines[name] = [n for n in lines[name] if bar_of(starts, n[0]) != b]
             log["breath_rests"].append({"instrument": name, "bar": b + 1})
 
+
+ENABLE_WIND_BREATHS = False
+BREATH_RUN_LIMIT = 10.0   # beats of continuous wind playing before a breath (validator limit is 16)
+
+def enforce_wind_breaths(lines, log):
+    """QX04: insert a one-beat breath into long wind lines by shortening a note of at least 2 beats.
+    Pitches are never changed; only the length of one note inside a long run is reduced."""
+    for name in WINDS & set(lines):
+        ns = lines[name]
+        i = 0
+        run = 0.0
+        while i < len(ns):
+            off, dur, midi, role = ns[i]
+            if i > 0:
+                po, pd = ns[i - 1][0], ns[i - 1][1]
+                if off - (po + pd) >= 1.0 - 1e-6:
+                    run = 0.0                      # already breathing
+            run += dur
+            if run > BREATH_RUN_LIMIT:
+                # shorten the latest note (at most 4 notes back) that has room for a one-beat rest
+                placed = False
+                for j in range(i, max(-1, i - 5), -1):
+                    if j - 0 < 1: break
+                    o2, d2 = ns[j - 1][0], ns[j - 1][1]
+                    if d2 >= 2.0 and ns[j - 1][3] != "bass":
+                        ns[j - 1][1] = d2 - 1.0
+                        log["breaths_added"] = log.get("breaths_added", 0) + 1
+                        placed = True
+                        break
+                if placed:
+                    run = dur + 0.0
+                    # recompute run from the shortened note: the gap now breaks the run
+                    run = 0.0
+                    run += dur
+                else:
+                    log.setdefault("breath_failed", []).append({"instrument": name, "offset": off})
+                    run = 0.0
+            i += 1
+
 def realize(s, events, melody, meta, plan):
     starts = [b[0] for b in meta["bars"]]
     log = {"octave_shifts": 0, "dropped": 0, "plans": {}, "fifths_fixed": 0, "fifths_unresolved": [],
@@ -292,6 +331,8 @@ def realize(s, events, melody, meta, plan):
     for name in lines: lines[name].sort(key=lambda n: n[0])
     merge_sustains(lines, meta, log)
     enforce_breath(lines, meta, log)
+    if ENABLE_WIND_BREATHS:
+        enforce_wind_breaths(lines, log)   # off by default: it created parallel fifths (HM32) in tests
     return lines, log
 
 # ---------- 4. score building ----------
@@ -381,8 +422,6 @@ def _active_db(wav_path):
 def auto_balance(path):
     """Measure each instrument alone (active frames only) and equalize apparent loudness with CC7."""
     import mido, numpy as np
-    if not SF2 or not find_fluidsynth():
-        return {}                      # audio tools missing: balancing is skipped (optional)
     mid = mido.MidiFile(path)
     meas = {}
     for i, tr in enumerate(mid.tracks):
@@ -393,7 +432,7 @@ def auto_balance(path):
         with tempfile.TemporaryDirectory() as d:
             mp, wp = os.path.join(d, "t.mid"), os.path.join(d, "t.wav")
             single.save(mp)
-            subprocess.run([find_fluidsynth(), "-ni", "-F", wp, "-r", "44100", SF2, mp],
+            subprocess.run(["fluidsynth", "-ni", "-F", wp, "-r", "44100", SF2, mp],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if os.path.exists(wp): meas[i] = _active_db(wp)
     if not meas: return {}
@@ -431,7 +470,6 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None):
     return log, issues, names
 
 if __name__ == "__main__":
-    if hasattr(sys.stdout, "reconfigure"): sys.stdout.reconfigure(encoding="utf-8")
     log, issues, names = run(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "off", sys.argv[4] if len(sys.argv) > 4 else None)
     import phrase_planner
     print(phrase_planner.table(json.load(open(sys.argv[2] + "_plan.json", encoding="utf-8"))))

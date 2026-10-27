@@ -1,4 +1,5 @@
 """
+Phrase planner v0.2 (viola in string-led phrases)
 Phrase planner v0.1 for the 'chamber_mini' ensemble.
 
 Step 1  map   : per-bar features -> phrase boundaries -> phrase kind (intro / lyric / figuration / run)
@@ -7,8 +8,8 @@ Step 2  plan  : one orchestration scene per phrase (melody colour, accompaniment
                 back to the orchestrator.
 All thresholds are author heuristics (not from the source book) and are listed in THRESHOLDS.
 """
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sys
+sys.path.insert(0, "/mnt/user-data/outputs")
 import validator
 
 RANGES = validator.RANGES_UNVERIFIED            # UNVERIFIED sounding ranges (MIDI)
@@ -136,7 +137,7 @@ def scene(kind, color, shift, climax):
         else: out.update(inner1=[["Violin II", 0, 0.0]], inner2=[["Viola", 0, 0.0]])
         out["bass"] = [["Cello", 0, 0.0]]
     else:                                                                     # lyric
-        if string_led: out.update(inner1=[["Clarinet", 0, 0.0]], inner2=[["Horn", 0, enter]])
+        if string_led: out.update(inner1=[["Viola", 0, 0.0]], inner2=[["Horn", 0, enter]])
         else: out.update(inner1=[["Violin II", 0, 0.0]], inner2=[["Viola", 0, enter]])
     if climax and not any(n == "Flute" for n, _ in COLORS[color]) and kind != "run":
         out["melody"] = out["melody"] + [["Flute", 12 + shift, 0.0]]
