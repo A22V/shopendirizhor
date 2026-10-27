@@ -4,11 +4,11 @@ Pairwise voice checks (works when some instruments rest).
 Implemented: HM32 parallel fifths (error), HM05 parallel octaves between violins
 (warning), G01 range (warning, ranges UNVERIFIED), piano part is skipped.
 """
-import json, sys, warnings, bisect, os
+import json, sys, warnings, bisect
 warnings.filterwarnings("ignore")
 from music21 import converter, chord
 
-RULES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "orchestration_rules.json")
+RULES_PATH = "/mnt/user-data/outputs/orchestration_rules.json"
 MAX_WIND_RUN_BEATS = 16  # author heuristic, not from the source book
 MAX_DOUBLING_RATIO = 1.35  # beat-sampled; 25 classical quartets: mean 1.06, max 1.54 (author heuristic)
 

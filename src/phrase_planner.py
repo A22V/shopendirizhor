@@ -201,6 +201,38 @@ def make_plan(s, events, melody, meta):
             if color in STRING_LED: why.append("melody in strings -> harmony in clarinet/horn (OR03)")
             else: why.append("melody in winds -> harmony in strings (OR03)")
         p["why"] = why
+    # breath fix (QX04): a wind melody in a long phrase hands over to strings halfway through
+    WIND_MEL = {"Flute", "Oboe", "Clarinet", "Bassoon"}
+    for p in phrases:
+        if p["kind"] == "intro" or not p.get("melody"): continue
+        a, b = p["bars"]
+        if (b - a + 1) < 4: continue
+        if not any(spec[0] in WIND_MEL for spec in p["melody"]): continue
+        winds = [[spec[0], spec[1], 0.0, 0.5] for spec in p["melody"] if spec[0] in WIND_MEL]
+        strings = [spec for spec in p["melody"] if spec[0] not in WIND_MEL]
+        if not strings:
+            strings = [["Violin I", 0, 0.0]]
+        second_half = [[s[0], s[1], 0.5] for s in strings]
+        p["melody"] = winds + second_half
+        p["why"] = p.get("why", []) + ["wind melody hands over to strings halfway (breath, QX04)"]
+    # bassoon bass (QX04): in longer phrases the bassoon stops halfway and the cello takes over
+    for p in phrases:
+        if p["kind"] == "intro" or not p.get("bass"): continue
+        a, b = p["bars"]
+        if (b - a + 1) < 4: continue
+        if not any(spec[0] == "Bassoon" for spec in p["bass"]): continue
+        bassoon = [["Bassoon", s[1], 0.0, 0.5] for s in p["bass"] if s[0] == "Bassoon"]
+        rest = [s for s in p["bass"] if s[0] != "Bassoon"]
+        if not any(s[0] == "Cello" for s in rest):
+            rest = rest + [["Cello", 0, 0.5]]
+        else:
+            rest = [[s[0], s[1], 0.5] if s[0] == "Cello" else s for s in rest]
+        p["bass"] = bassoon + rest
+        p["why"] = p.get("why", []) + ["bassoon bass hands over to cello halfway (breath, QX04)"]
+    # viola must play in every phrase (QX06): in cello+bassoon phrases the viola takes the first inner voice
+    for p in phrases:
+        if p.get("color") == "cello+bassoon" and p.get("inner1") and p["inner1"][0][0] == "Clarinet":
+            p["inner1"] = [["Viola", 0, 0.0]]
     levels = phrase_levels(phrases)
     for p, lv in zip(phrases, levels):
         p["level"] = lv
