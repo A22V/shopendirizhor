@@ -336,6 +336,16 @@ def realize(s, events, melody, meta, plan):
     return lines, log
 
 # ---------- 4. score building ----------
+
+def piece_key(s):
+    """Concert key of the piece as a music21 Key (estimated from the source; check by eye)."""
+    from music21 import key as m21key
+    try:
+        k = s.analyze("key")
+        return m21key.Key(k.tonic.name, k.mode)
+    except Exception:
+        return m21key.Key("C")
+
 def add_dynamics(score, dyn_by_bar):
     last = None
     for b in sorted(dyn_by_bar):
@@ -375,6 +385,17 @@ def build_score(s, lines, dyn, piano_mode="off", meta=None):
         p.makeMeasures(inPlace=True)
         out.insert(0, p)
     add_dynamics(out, dyn)
+    # explicit key signature per part: concert key from the piece, written key = concert key transposed
+    from music21 import key as m21key
+    concert = piece_key(s)
+    for p in out.parts:
+        if p.partName == "Piano":
+            continue
+        ins = p.getInstrument(returnDefault=False)
+        tr = getattr(ins, "transposition", None) if ins is not None else None
+        written = concert.transpose(tr) if tr is not None else concert
+        for m in list(p.getElementsByClass(stream.Measure))[:1]:
+            m.insert(0, m21key.KeySignature(written.sharps))
     for p in out.parts: p.atSoundingPitch = True
     return out
 
