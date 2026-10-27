@@ -1,0 +1,1407 @@
+{
+  "meta": {
+    "name": "Chamber orchestration rules (draft v0.5)",
+    "source": "N. Rimsky-Korsakov, Principles of Orchestration (ed. M. Steinberg, transl. E. Agate), Project Gutenberg #33900",
+    "coverage": "Chapters I, II, III, IV read in full from the Project Gutenberg text; passages about harp, percussion, voice and stage band are not included because they do not apply to the chamber ensemble.",
+    "status": "draft",
+    "text_policy": "All entries are paraphrases written for this project, not quotations.",
+    "severity_levels": {
+      "error": "Hard constraint: validator must reject or auto-fix.",
+      "warning": "Heuristic: validator reports, planner may override with a reason.",
+      "hint": "Style guidance for the planner; not checked automatically."
+    },
+    "corpus_check_summary": {
+      "corpus": "46 string quartets from music21 bundled corpus (Haydn op.1/74, Mozart K.80/155/156/458, Beethoven op.18/59/74/132/133)",
+      "method": "voice-by-voice (each instrument part separately), similar-motion pairs, unisons excluded",
+      "limitations": "Only string quartets; no wind data. Interpretive, not musicological proof.",
+      "date": "2026-10-22",
+      "corrections": [
+        "2026-10-22: parallel fifth check now direction-independent (abs interval mod 12); fifth rates corrected to 0.6-1.2%; octave rates re-expressed as share of similar-motion moves (13-25%).",
+        "2026-10-22: music21 corpus lists only LOWEST notes of instruments (matching my table after transposition); upper limits remain UNVERIFIED."
+      ]
+    }
+  },
+  "ensemble_profile": {
+    "id": "chamber_mini",
+    "instruments": [
+      "flute",
+      "oboe",
+      "clarinet_bb",
+      "bassoon",
+      "horn_f",
+      "violin_1",
+      "violin_2",
+      "viola",
+      "cello",
+      "double_bass"
+    ],
+    "optional": [
+      "piano",
+      "tuba"
+    ],
+    "piano_modes": [
+      "full",
+      "reduced",
+      "off"
+    ],
+    "players_per_part": 1,
+    "ranges": {
+      "status": "PENDING",
+      "note": "Range tables in the source are images and could not be read. Fill ranges from a verified reference before enabling the range checker."
+    }
+  },
+  "axioms": [
+    {
+      "id": "AX1",
+      "description_ru": "В оркестре нет некрасивых тембров: любой тембр уместен при правильном применении.",
+      "use": "Не запрещать тембры целиком; ограничивать только неудачное применение."
+    },
+    {
+      "id": "AX2",
+      "description_ru": "Партии должны быть удобны для исполнения.",
+      "use": "Каждая партия проходит проверку на исполнимость."
+    },
+    {
+      "id": "AX3",
+      "description_ru": "Писать нужно для реального состава, а не для воображаемого.",
+      "use": "Все правила привязаны к ensemble_profile; числа из книги для большого оркестра требуют пересчёта."
+    }
+  ],
+  "rules": [
+    {
+      "id": "G01",
+      "category": "general",
+      "severity": "error",
+      "applies_to": [
+        "all"
+      ],
+      "check": "note_within_instrument_range",
+      "description_ru": "Все ноты должны лежать в диапазоне инструмента. Крайние регистры допустимы только осторожно (длинные ноты, без больших скачков).",
+      "source": "Ch. I, strings and winds",
+      "status": "pending_ranges"
+    },
+    {
+      "id": "G02",
+      "category": "melody",
+      "severity": "warning",
+      "applies_to": [
+        "melody_voice"
+      ],
+      "check": "melody_prominence",
+      "description_ru": "Мелодия должна выделяться из аккомпанемента. В верхнем регистре она слышна за счёт положения, в крайнем нижнем слабее; в среднем регистре нужен хотя бы один приём: динамический акцент, контраст тембра, дублировка или перекрещивание голосов.",
+      "source": "Ch. II, opening"
+    },
+    {
+      "id": "G03",
+      "category": "melody",
+      "severity": "warning",
+      "applies_to": [
+        "melody_voice"
+      ],
+      "check": "extreme_register_octave_doubling",
+      "description_ru": "Мелодию в крайне высоком регистре желательно дублировать октавой ниже, в крайне низком октавой выше.",
+      "source": "Ch. II, doubling in octaves; Ch. II, woodwinds in octaves",
+      "params": {
+        "extreme_high_threshold": null,
+        "extreme_low_threshold": null
+      }
+    },
+    {
+      "id": "G04",
+      "category": "texture",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "compound_timbre_ratio",
+      "description_ru": "Постоянное использование сложных (смешанных) тембров даёт нейтральную однообразную фактуру. Простые сочетания и соло дают больше разнообразия красок.",
+      "source": "Ch. I, end; Ch. II, woodwinds in unison"
+    },
+    {
+      "id": "G05",
+      "category": "texture",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "wind_fatigue_rotation",
+      "description_ru": "Струнные не утомляют слушателя, духовые утомляют быстрее. Не держать духовые непрерывно; освежать их звучание подключением струнных.",
+      "source": "Ch. I, end"
+    },
+    {
+      "id": "S01",
+      "category": "strings",
+      "severity": "warning",
+      "applies_to": [
+        "violin_1",
+        "violin_2",
+        "viola",
+        "cello",
+        "double_bass"
+      ],
+      "check": "fast_chromatic_run",
+      "description_ru": "Длинные быстрые хроматические пассажи на струнных звучат расплывчато; такие места лучше отдавать деревянным духовым.",
+      "source": "Ch. I, strings",
+      "params": {
+        "tempo_threshold": null
+      }
+    },
+    {
+      "id": "S02",
+      "category": "strings",
+      "severity": "warning",
+      "applies_to": [
+        "violin_1",
+        "violin_2",
+        "viola",
+        "cello"
+      ],
+      "check": "high_register_usage",
+      "description_ru": "Верхние ноты за пределами основного диапазона допустимы в длинных длительностях, тремоло, медленных плавных мелодиях, без быстрых гамм и без скачков.",
+      "source": "Ch. I, strings",
+      "status": "pending_ranges"
+    },
+    {
+      "id": "S03",
+      "category": "strings",
+      "severity": "warning",
+      "applies_to": [
+        "double_bass"
+      ],
+      "check": "double_bass_independence",
+      "description_ru": "Контрабас редко ведёт самостоятельную партию (кроме выдержанных органных пунктов): чаще идёт с виолончелью в унисон или октаву либо дублирует фагот. Кантилена только вместе с виолончелью или фаготом.",
+      "source": "Ch. I, strings; Ch. II, double basses"
+    },
+    {
+      "id": "S04",
+      "category": "strings",
+      "severity": "hint",
+      "applies_to": [
+        "viola"
+      ],
+      "check": "viola_melody",
+      "description_ru": "Альт лучше подходит для коротких характерных фраз и обычно дублируется другими струнными или деревянными; протяжные кантилены на альте встречаются реже, чем на скрипке и виолончели.",
+      "source": "Ch. II, violas"
+    },
+    {
+      "id": "S05",
+      "category": "strings",
+      "severity": "hint",
+      "applies_to": [
+        "cello"
+      ],
+      "check": "cello_melody",
+      "description_ru": "Виолончель хороша для напряжённой страстной кантилены, обычно на верхней струне; быстрые фигурации ей подходят меньше.",
+      "source": "Ch. II, violoncellos"
+    },
+    {
+      "id": "S06",
+      "category": "strings",
+      "severity": "hint",
+      "applies_to": [
+        "violin_1",
+        "violin_2"
+      ],
+      "check": "violin_melody",
+      "description_ru": "Мелодию в сопрано-альтовом и очень высоком регистре обычно получает первая скрипка; вторая скрипка или обе в унисон дают более полный звук без потери качества тембра. В очень высоком регистре скрипичная мелодия теряет полноту и изолируется, если не дублируется октавой.",
+      "source": "Ch. II, violins; Ch. II, strings in octaves"
+    },
+    {
+      "id": "S07",
+      "category": "strings",
+      "severity": "warning",
+      "applies_to": [
+        "violin_1",
+        "violin_2",
+        "viola",
+        "cello"
+      ],
+      "check": "harmonics_usage",
+      "description_ru": "Флажолеты холодны, малосильны и служат украшением: использовать редко, на выдержанных нотах или в тремоло, не в простых мелодиях, и не заглушать другими инструментами.",
+      "source": "Ch. I, strings"
+    },
+    {
+      "id": "S08",
+      "category": "strings",
+      "severity": "warning",
+      "applies_to": [
+        "strings"
+      ],
+      "check": "muted_strings_with_winds",
+      "description_ru": "Сурдина заметно уменьшает громкость и меняет тембр. Струнные с сурдиной плохо сливаются с деревянными духовыми, тембры остаются раздельными.",
+      "source": "Ch. I, strings; Ch. I, combinations"
+    },
+    {
+      "id": "S09",
+      "category": "strings",
+      "severity": "warning",
+      "applies_to": [
+        "strings"
+      ],
+      "check": "pizzicato_speed",
+      "description_ru": "Пиццикато не может звучать так быстро, как смычок, и на низких струнах (контрабас) ещё медленнее. В аккордах пиццикато лучше избегать открытых струн.",
+      "source": "Ch. I, pizzicato",
+      "params": {
+        "max_speed_by_instrument": null
+      }
+    },
+    {
+      "id": "S10",
+      "category": "strings",
+      "severity": "error",
+      "applies_to": [
+        "strings"
+      ],
+      "check": "divisi_with_solo_players",
+      "description_ru": "Адаптация для камерного состава (не из книги): при одном исполнителе на партию деление партии (divisi) невозможно; допустимы только двойные ноты и аккорды в пределах возможностей инструмента.",
+      "source": "Inference. Book notes that many-part divisi is hard to realise even in small orchestras.",
+      "status": "inference"
+    },
+    {
+      "id": "W01",
+      "category": "winds",
+      "severity": "warning",
+      "applies_to": [
+        "flute",
+        "oboe",
+        "clarinet_bb",
+        "bassoon",
+        "horn_f"
+      ],
+      "check": "breath_rests",
+      "description_ru": "Духовым нужны паузы для дыхания: слишком длинные непрерывные фразы недопустимы. У струнных такого ограничения нет.",
+      "source": "Ch. I, woodwinds and brass",
+      "params": {
+        "max_continuous_seconds": null
+      }
+    },
+    {
+      "id": "W02",
+      "category": "winds",
+      "severity": "error",
+      "applies_to": [
+        "oboe",
+        "clarinet_bb",
+        "bassoon",
+        "horn_f"
+      ],
+      "check": "double_tonguing",
+      "description_ru": "Двойное стаккато (быстрое повторение одной ноты двойным языком) возможно только на флейте среди деревянных; остальные используют одинарный язык.",
+      "source": "Ch. I, woodwinds",
+      "params": {
+        "single_tongue_max_rate": null
+      }
+    },
+    {
+      "id": "W03",
+      "category": "winds",
+      "severity": "warning",
+      "applies_to": [
+        "clarinet_bb"
+      ],
+      "check": "octave_leaps",
+      "description_ru": "Кларнет плохо приспособлен к внезапным скачкам через октаву; на флейте, гобое и фаготе такие скачки легче.",
+      "source": "Ch. I, woodwinds"
+    },
+    {
+      "id": "W04",
+      "category": "winds",
+      "severity": "warning",
+      "applies_to": [
+        "oboe",
+        "bassoon"
+      ],
+      "check": "legato_arpeggio_alternation",
+      "description_ru": "Арпеджио и быстрая смена двух звуков в легато хорошо звучат на флейте и кларнете, но не на гобое и фаготе.",
+      "source": "Ch. I, woodwinds"
+    },
+    {
+      "id": "W05",
+      "category": "winds",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "articulation_preference",
+      "description_ru": "Чёткое, острое стаккато лучше удаётся гобою и фаготу; протяжное легато флейте и кларнету. Это ориентир, от него можно отступать.",
+      "source": "Ch. I, woodwinds"
+    },
+    {
+      "id": "W06",
+      "category": "winds",
+      "severity": "warning",
+      "applies_to": [
+        "flute",
+        "oboe",
+        "clarinet_bb",
+        "bassoon"
+      ],
+      "check": "woodwind_natural_order",
+      "description_ru": "Естественный порядок деревянных по регистру: флейта, гобой, кларнет, фагот (сверху вниз). Перестановка (например фагот выше кларнета) даёт искусственный тембр и допустима лишь для особых эффектов.",
+      "source": "Ch. II, melody in woodwinds"
+    },
+    {
+      "id": "W07",
+      "category": "winds",
+      "severity": "warning",
+      "applies_to": [
+        "flute",
+        "oboe",
+        "clarinet_bb",
+        "bassoon"
+      ],
+      "check": "same_instrument_octave_doubling",
+      "description_ru": "Дублировка одинаковых инструментов в октаву (две флейты, два кларнета и т.п.) не рекомендуется, так как они играют в разных регистрах и не соответствуют друг другу. Допустима, если октавы поддерживают струнные, особенно в среднем регистре.",
+      "source": "Ch. II, woodwinds in octaves",
+      "chamber_note": "С одним исполнителем на инструмент правило применяется только при дублировке одного тембра разными голосами."
+    },
+    {
+      "id": "W08",
+      "category": "winds",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "solo_vs_doubling",
+      "description_ru": "Соло выразительнее, чем дублировка; смешанные тембры чаще уместны в громких местах и там, где важны широта и сила, а не индивидуальная краска.",
+      "source": "Ch. II, woodwinds in unison"
+    },
+    {
+      "id": "W09",
+      "category": "winds",
+      "severity": "error",
+      "applies_to": [
+        "flute",
+        "clarinet_bb",
+        "oboe",
+        "bassoon"
+      ],
+      "check": "wind_mute_validity",
+      "description_ru": "Сурдина осмысленна для гобоя и фагота (звучание приглушается вплоть до крайнего пианиссимо). Для кларнета она не нужна, для флейты не изобретена. Самые низкие ноты гобоя и фагота с сурдиной невозможны, в самом высоком регистре сурдина не действует.",
+      "source": "Ch. I, woodwinds"
+    },
+    {
+      "id": "H01",
+      "category": "horn",
+      "severity": "warning",
+      "applies_to": [
+        "horn_f"
+      ],
+      "check": "horn_agility",
+      "description_ru": "Валторна малоподвижна: быстрые пассажи ей противопоказаны, звук рождается как бы лениво.",
+      "source": "Ch. I, brass"
+    },
+    {
+      "id": "H02",
+      "category": "horn",
+      "severity": "hint",
+      "applies_to": [
+        "horn_f"
+      ],
+      "check": "horn_bridge_role",
+      "description_ru": "Валторна хорошо сливается с фаготом (средний регистр) и служит связкой между деревянными и медью; звук мягкий и поэтичный.",
+      "source": "Ch. I, brass and combinations"
+    },
+    {
+      "id": "H03",
+      "category": "horn",
+      "severity": "hint",
+      "applies_to": [
+        "horn_f"
+      ],
+      "check": "horn_stopped_or_muted",
+      "description_ru": "Закрытые звуки и сурдина приглушают валторну и приближают её тембр к гобою и английскому рожку; в форте звук становится резким, в пиано нежным и тусклым.",
+      "source": "Ch. I, brass"
+    },
+    {
+      "id": "T01",
+      "category": "tuba_optional",
+      "severity": "hint",
+      "applies_to": [
+        "tuba"
+      ],
+      "check": "tuba_role",
+      "description_ru": "Туба густая и грубоватая, малоэкспрессивна, но ценна для дублировки баса октавой ниже. В малом камерном составе по умолчанию отключена.",
+      "source": "Ch. I, brass"
+    },
+    {
+      "id": "B01",
+      "category": "balance",
+      "severity": "warning",
+      "applies_to": [
+        "piano",
+        "strings",
+        "winds"
+      ],
+      "check": "sustained_groups_vs_soft_instruments",
+      "description_ru": "Группы с долгим звучанием легко заглушают тихое фортепиано, пиццикато и col legno. При сохранении рояля в составе его партию нужно балансировать с духовыми и струнными.",
+      "source": "Ch. I, comparison of resonance"
+    },
+    {
+      "id": "B02",
+      "category": "blend",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "winds_with_strings",
+      "description_ru": "Духовые утолщают звучание струнных и смягчают медь. Группа струнных, добавленная к духовым в унисон, даёт мягкий слитный тембр с преобладанием духовых; один духовой, добавленный ко всей группе струнных, только утолщает струнные, и тембр духового теряется.",
+      "source": "Ch. I, combinations",
+      "chamber_note": "Пропорции даны для оркестра с десятками струнных; при одном исполнителе на партию пересчитать."
+    },
+    {
+      "id": "B03",
+      "category": "blend",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "pizzicato_with_winds",
+      "description_ru": "Духовые усиливают и проясняют пиццикато; пиццикато в сочетании со смычковыми звучит не слитно: оба тембра слышны отдельно.",
+      "source": "Ch. I, combinations"
+    },
+    {
+      "id": "B04",
+      "category": "blend",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "timbre_bridges",
+      "description_ru": "Тембровые мостики: флажолеты струнных и флейта (верх), альт и средний регистр фагота и нижний кларнета (середина), фагот и валторна (деревянные и медь).",
+      "source": "Ch. I, combinations"
+    },
+    {
+      "id": "HM01",
+      "category": "harmony",
+      "severity": "warning",
+      "applies_to": [
+        "planner",
+        "validator"
+      ],
+      "check": "voice_leading_clean",
+      "description_ru": "Хорошая гармоническая фактура требует чистого и точного ведения каждого голоса. Плохое звучание часто вызвано не выбором инструментов, а неверным голосоведением; такой отрывок звучит плохо на любых инструментах. Голосоведение проверяется до выбора тембров.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM02",
+      "category": "harmony",
+      "severity": "warning",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "texture_change_at_phrase_boundary",
+      "description_ru": "Число гармонических голосов нужно определить заранее. Переход от одного склада к другому (четыре голоса в три, пять в унисон и т.п.) должен совпадать с началом новой фразы или мысли; иначе приходится вводить дополнительные инструменты и портить звучание аккорда.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM03",
+      "category": "harmony",
+      "severity": "hint",
+      "applies_to": [
+        "analysis"
+      ],
+      "check": "reduce_to_four_real_parts",
+      "description_ru": "Основа гармонии почти всегда четырёхголосная. Кажущиеся пяти-, шести-, семи- и восьмиголосные аккорды это обычно четыре голоса плюс октавные удвоения верхних голосов в ближайшей верхней октаве; бас удваивается только вниз. Алгоритм анализа: свести фортепианный аккорд к четырём настоящим голосам и отдельно хранить удвоения.",
+      "source": "Ch. III (Harmony)",
+      "implementation_note": "Ключевое правило для перекладывания фортепианных аккордов."
+    },
+    {
+      "id": "HM04",
+      "category": "harmony",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "doubling_in_wide_spacing",
+      "description_ru": "При широком расположении аккорда октавой можно удваивать только сопрано и альт. Удвоение тенора превращает расположение в тесное, удвоение баса даёт тяжесть. Бас не должен смешиваться с остальными голосами.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM05",
+      "category": "harmony",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "parallel_octaves_upper_parts",
+      "description_ru": "Параллельные октавы между верхними голосами недопустимы. Исключение: параллельные квинты, возникающие от удвоения трёх верхних голосов в секстаккордах, значения не имеют.",
+      "source": "Ch. III (Harmony)",
+      "corpus_check": {
+        "status": "contradicted_in_part",
+        "data": "46 string quartets. Among moves of two voices in similar motion, parallel octaves (true octave, not unison) occur in about 13-25% of cases depending on the voice pair.",
+        "conclusion": "Строгий запрет параллельных октав не соответствует практике корпуса. Оставить как предупреждение.",
+        "corrected": "2026-10-22: earlier figure (4-9%) used a different denominator."
+      }
+    },
+    {
+      "id": "HM06",
+      "category": "harmony",
+      "severity": "error",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "no_doubling_inverted_dominant_bass",
+      "description_ru": "Бас обращения доминантового аккорда (а также других септаккордов и уменьшённого септаккорда) нельзя удваивать в верхних голосах.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM07",
+      "category": "harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "pedal_and_passing_notes",
+      "description_ru": "Правила гармонии для выдержанных и органных нот действуют и в оркестре. В быстрых пассажах допускается свобода с проходящими и вспомогательными нотами. Верхний и внутренний органный пункты в оркестре эффектнее, чем на рояле, из-за разнообразия тембров.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM08",
+      "category": "chord_distribution",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "natural_harmonic_series_spacing",
+      "description_ru": "Расположение звуков аккорда ориентируется на натуральный звукоряд: широкие интервалы внизу, всё более тесные к верху (октавы и сексты в басу, квинты и кварты в середине, терции и секунды вверху). Бас редко отстоит от соседнего голоса дальше чем на октаву.",
+      "source": "Ch. III (Harmony)",
+      "params": {
+        "max_bass_to_next_voice_semitones": 12
+      },
+      "corpus_check": {
+        "status": "supported",
+        "data": "Most common bass-to-next-voice intervals: octave (12 st.), fifth (7), major/minor third (4, 3).",
+        "conclusion": "Соответствует правилу о расположении аккорда."
+      }
+    },
+    {
+      "id": "HM09",
+      "category": "chord_distribution",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "no_middle_void",
+      "description_ru": "Не оставлять пустот в средних голосах, особенно в форте: широкие пустые интервалы между верхом и низом аккорда звучат плохо. В пиано такое расположение возможно, но редко. Современная практика предпочитает тесное расположение, в духовых и в форте, и в пиано.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM10",
+      "category": "chord_distribution",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "contrary_motion_fill",
+      "description_ru": "При движении крайних голосов в противоположных направлениях (расхождение) постепенно добавляются средние голоса; при сближении средние голоса снимаются по одному.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM11",
+      "category": "chord_distribution",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "temporary_doubling_for_progression",
+      "description_ru": "Для логичного голосоведения допустимо временное удвоение одного голоса: слух принимает краткое нарушение баланса ради чистоты движения голосов.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM12",
+      "category": "strings_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "violin_1",
+        "violin_2",
+        "viola",
+        "cello",
+        "double_bass"
+      ],
+      "check": "short_string_chords",
+      "description_ru": "Короткие аккорды смычком (трёх-четырёхзвучные) хорошо звучат лишь в форте или с акцентом и при поддержке духовых; важнее их полнозвучность и удобство исполнения, чем точный баланс голосов. Аккорды на нескольких струнах обычно поручают скрипкам и альтам, распределяя звуки по удобству. Виолончель редко играет трёх- и четырёхзвучные аккорды: чаще берёт нижний звук вместе с контрабасом; контрабас может дать октаву на открытой струне.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM13",
+      "category": "strings_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "strings"
+      ],
+      "check": "sustained_string_chords_balance",
+      "description_ru": "Выдержанные и тремолирующие аккорды требуют ровного баланса. Тесное четырёхголосие с басом в октавах звучит равномерно. Чтобы заполнить пустую середину при удалении верхних голосов от баса, используют двойные ноты у скрипок и альтов, а не divisi лишь части голосов. Если вся гармония записана divisi единообразно, баланс хороший, но недеящиеся виолончели и контрабасы звучат тяжеловато, и их нужно ослабить динамикой.",
+      "source": "Ch. III (Harmony)",
+      "chamber_note": "При одном исполнителе на партию divisi невозможно (см. S10): заполнять середину двойными нотами."
+    },
+    {
+      "id": "HM14",
+      "category": "wind_harmony",
+      "severity": "warning",
+      "applies_to": [
+        "flute",
+        "oboe",
+        "clarinet_bb",
+        "bassoon"
+      ],
+      "check": "consistent_doubling_in_passage",
+      "description_ru": "Инструменты, составляющие аккорды, должны использоваться одинаково на протяжении отрывка: либо все голоса удвоены, либо ни один. Исключение: когда один голос нужно сделать заметнее.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM15",
+      "category": "wind_harmony",
+      "severity": "warning",
+      "applies_to": [
+        "flute",
+        "oboe",
+        "clarinet_bb",
+        "bassoon"
+      ],
+      "check": "normal_register_order_in_chords",
+      "description_ru": "В аккордах соблюдать нормальный порядок регистров (флейта, гобой, кларнет, фагот сверху вниз), кроме сознательного перекрещивания или заключения голосов.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM16",
+      "category": "wind_harmony",
+      "severity": "warning",
+      "applies_to": [
+        "flute",
+        "oboe",
+        "clarinet_bb",
+        "bassoon"
+      ],
+      "check": "register_matching",
+      "description_ru": "Соответствующие или смежные регистры инструментов должны совпадать. Нельзя сочетать слабый, тихий регистр одного инструмента с мощным, пронзительным регистром другого (например, низкая флейта и верх гобоя).",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM17",
+      "category": "wind_harmony",
+      "severity": "warning",
+      "applies_to": [
+        "oboe",
+        "flute",
+        "clarinet_bb",
+        "bassoon"
+      ],
+      "check": "same_timbre_interval_type",
+      "description_ru": "Инструментам одного тембра отдавать консонансы (октавы, терции, сексты), а не кварты, квинты, секунды и септимы, кроме случаев, когда диссонанс нужно подчеркнуть. Особенно строго для гобоя с его пронзительным тембром.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM18",
+      "category": "wind_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "voicing_method_overlay_cross_enclose",
+      "description_ru": "Три способа расположения аккорда для духовых: наложение (строго по порядку регистров), перекрещивание и заключение голосов. Наложение лучший вариант по умолчанию; другие два применять в зависимости от регистра отдельного аккорда и хода голосов. Один тембр лучше поручать неподвижным голосам, другой движущимся.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM19",
+      "category": "wind_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "timbre_pairing_in_four_part",
+      "description_ru": "Широкое четырёхголосие: ноты распределять парами между двумя тембрами по нормальному порядку регистров. Заключать один тембр можно только между двумя другими. Четыре разных тембра в одном аккорде возможны при широком расположении (тем лучше, чем выше регистр), но в тесном четырёхголосии их следует избегать.",
+      "source": "Ch. III (Harmony)",
+      "chamber_note": "В составе с одним инструментом каждого вида (флейта, гобой, кларнет, фагот) четырёхголосный аккорд из деревянных неизбежно получает четыре разных тембра. Автор отмечает, что именно так пишется для такого состава. Для тесного расположения лучше подключать струнные или валторну, чтобы получить пары."
+    },
+    {
+      "id": "HM20",
+      "category": "wind_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "three_part_wind_chord",
+      "description_ru": "Трёхголосные аккорды чаще всего поручают двум инструментам одного тембра и одному другого, но не трём разным тембрам; лучший способ расположения наложение. Три инструмента одного тембра дают хороший результат в тесном трёхголосии; в широком хуже, если только третий инструмент не низкого регистра.",
+      "source": "Ch. III (Harmony)",
+      "chamber_note": "В нашем составе пар одного тембра нет; трёхголосие из деревянных будет из трёх разных тембров. Дополнять парой из струнных."
+    },
+    {
+      "id": "HM21",
+      "category": "wind_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "multi_part_winds_as_octave_doubling",
+      "description_ru": "Аккорды из пяти-восьми звуков для духовых строятся как октавные удвоения нижних четырёх голосов; инструменты подбирать так, чтобы они хорошо сочетались в октавах. Широкое многоголосие, сочетающее тесное и разреженное расположение, избегать.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM22",
+      "category": "wind_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "outer_parts_thinner",
+      "description_ru": "В духовых аккордах крайние голоса (верхний и нижний) обычно тоньше и слабее, средние полнее и сильнее. Для пар инструментов тембры стараются смешивать.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM23",
+      "category": "wind_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "wind_strings_division_of_harmony",
+      "description_ru": "Гармоническая основа из четырёх голосов не обязательно целиком у духовых: один голос часто отдают струнным (смычком или пиццикато). Если духовые ведут три верхних голоса сами, они должны образовывать самостоятельное целое без опоры на бас и избегать пустых открытых кварт и квинт. Если же внутренние голоса духовых поддерживают струнные, брать наполненные интервалы: секунды, септимы, терции, сексты.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM24",
+      "category": "wind_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "short_staccato_chords_leniency",
+      "description_ru": "В коротких аккордах, разделённых заметными паузами, расположение тембров и голосоведение менее заметны на слух, поэтому требования к ним мягче, чем для выдержанных аккордов и ритмических фигураций.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM25",
+      "category": "wind_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "default_wind_policy",
+      "description_ru": "Практический совет начинающему: писать для духовых в нормальном порядке регистров, составлять каждый аккорд либо только из удвоенных, либо только из неудвоенных голосов, сосредоточиться на тесном расположении.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM26",
+      "category": "combined_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "horn_f",
+        "bassoon",
+        "clarinet_bb",
+        "oboe",
+        "flute"
+      ],
+      "check": "horn_with_winds",
+      "description_ru": "Деревянные усиливают медь, смягчают её и убирают резкость. Сочетания с валторной: валторна + фагот, валторна + кларнет; закрытые (сурдинные) звуки валторны с гобоем или английским рожком дают красивый тембр; средние ноты закрытой валторны с глубокими нотами кларнета красивый тёмный тембр (с фаготом вместо кларнета характер частично теряется).",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM27",
+      "category": "combined_harmony",
+      "severity": "warning",
+      "applies_to": [
+        "horn_f",
+        "bassoon"
+      ],
+      "check": "horn_bassoon_balance",
+      "description_ru": "Фагот и валторна лучше всего примиряют группы деревянных и меди. В пиано четырёхголосие из двух фаготов и двух валторн звучит сбалансированно и прозрачнее квартета валторн; в форте валторны заглушают фаготов. При перекрещивании консонансы лучше отдавать валторнам, диссонансы фаготам. Фаготы можно писать внутри валторн, но не наоборот. Кларнеты редко ставят внутрь валторн.",
+      "source": "Ch. III (Harmony)",
+      "chamber_note": "В нашем составе одна валторна и один фагот: правило о парах не применяется напрямую, но соотношение сил (валторна сильнее фагота в форте) сохраняется."
+    },
+    {
+      "id": "HM28",
+      "category": "combined_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "stationary_vs_moving_parts",
+      "description_ru": "В цепочке аккордов неподвижные голоса лучше поручать меди, движущиеся деревянным. Если баланс не достигается, духовые можно отметить на одну динамическую ступень громче меди.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM29",
+      "category": "combined_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "strings_with_brass",
+      "description_ru": "Из-за отсутствия родства тембров струнные с медью редко сочетают вплотную. Исключения: струнные тремоло с выдержанной медью; короткие аккорды струнных с акцентом; валторна, удвоенная альтами или виолончелями (красивый эффект).",
+      "source": "Ch. III (Harmony)",
+      "chamber_note": "С одной валторной в составе удвоение альтом или виолончелью (соло, без divisi) вполне применимо."
+    },
+    {
+      "id": "HM30",
+      "category": "combined_harmony",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "three_groups_together",
+      "description_ru": "Сочетание струнных, деревянных и меди рядом даёт полный, округлый и твёрдый звук. Для выдержанных и ритмических аккордов баланс гораздо важнее, чем для коротких отрывистых.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "HM31",
+      "category": "chord_distribution",
+      "severity": "hint",
+      "applies_to": [
+        "analysis",
+        "validator"
+      ],
+      "check": "octave_reinforcement_balance",
+      "description_ru": "Акустическое явление: в аккорде октавные голоса усиливают друг друга, и это помогает частично компенсировать неравенство сил инструментов.",
+      "source": "Ch. III (Harmony)"
+    },
+    {
+      "id": "ML01",
+      "category": "melody_winds",
+      "severity": "warning",
+      "applies_to": [
+        "flute",
+        "oboe",
+        "clarinet_bb",
+        "bassoon"
+      ],
+      "check": "thirds_sixths_wind_order",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Мелодия в терциях и секстах у деревянных: либо два инструмента одного тембра, либо разные тембры в нормальном порядке регистров. Перестановка порядка даёт натянутый, вымученный звук. Для терций лучше пары одинаковых инструментов, для секст разные тембры.",
+      "chamber_note": "Одинаковых пар в составе нет, поэтому терции и сексты строить из разных тембров в нормальном порядке (например, флейта над гобоем, гобой над кларнетом)."
+    },
+    {
+      "id": "ML02",
+      "category": "melody_brass",
+      "severity": "hint",
+      "applies_to": [
+        "horn_f"
+      ],
+      "check": "horn_melody_character",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Медь лучше всего подходит для фанфарных фигур и несложных диатонических мелодий (торжественных в мажоре, мрачных в миноре). Хроматические и энгармонические мелодии ей менее свойственны. Выражать страсть и задушевность медь не умеет, такие фразы звучат у неё вяло. Валторна в пиано более поэтична и допускает более широкий выбор мелодий."
+    },
+    {
+      "id": "MG01",
+      "category": "melody_mixed",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "wind_plus_brass_unison",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Дублировка духового с медью в унисон: преобладает тембр меди, но звук мягче и слегка слаще, чем у меди одной; легато получается лучше. Для валторны это чаще кларнет или фагот."
+    },
+    {
+      "id": "MG02",
+      "category": "melody_mixed",
+      "severity": "warning",
+      "applies_to": [
+        "horn_f",
+        "flute",
+        "oboe",
+        "clarinet_bb"
+      ],
+      "check": "horn_octave_doubling_by_winds",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Валторну можно дублировать в верхней октаве деревянными (кларнеты, гобои, флейты), чтобы получить в верху богатый тембр. Одной валторне в верхней октаве нужны два деревянных; если нижнюю октаву играют две валторны, нужно три-четыре духовых, особенно в форте.",
+      "chamber_note": "С одной валторной и по одному деревянному каждого вида в верхней октаве будет не хватать силы: компенсировать динамикой или подключать струнные."
+    },
+    {
+      "id": "MG03",
+      "category": "melody_mixed",
+      "severity": "hint",
+      "applies_to": [
+        "strings",
+        "winds"
+      ],
+      "check": "strings_plus_wind_unison",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Все сочетания струнных и деревянных хороши: духовой усиливает и расширяет звук струнного, а струнный смягчает тембр духового. При равной силе (например, скрипка + гобой, фагот + виолончель) преобладают струнные. Несколько духовых в унисон с одной группой струнных заглушают их. Сочетание в целом сглаживает особенности каждого инструмента, причём деревянные теряют больше.",
+      "chamber_note": "Пара один к одному (скрипка + гобой, виолончель + фагот) соответствует случаю равной силы, описанному автором."
+    },
+    {
+      "id": "MG04",
+      "category": "melody_mixed",
+      "severity": "hint",
+      "applies_to": [
+        "strings",
+        "winds"
+      ],
+      "check": "best_string_wind_pairs",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Лучшие пары струнные + духовые те, у которых ближе совпадают регистры: скрипка + флейта, гобой или кларнет; альт + гобой, кларнет или фагот; виолончель + кларнет или фагот; контрабас + фагот. Цели: получить новый тембр, усилить струнных, смягчить деревянные."
+    },
+    {
+      "id": "MG05",
+      "category": "melody_mixed",
+      "severity": "warning",
+      "applies_to": [
+        "strings",
+        "winds"
+      ],
+      "check": "cross_group_octave_doubling",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Дублировка в октаву между группами (струнные в одной октаве, духовые в другой) не рекомендуется: тембры слишком разные. Если из двух октавных голосов дублируется только один, мелодию в сопрано лучше отдать духовым в октаву, а струнными продублировать лишь нижний голос."
+    },
+    {
+      "id": "MG06",
+      "category": "melody_mixed",
+      "severity": "hint",
+      "applies_to": [
+        "cello",
+        "bassoon",
+        "double_bass"
+      ],
+      "check": "soft_low_melody",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Для мягкой мелодии в низком регистре: виолончель с фаготом в октаве с контрабасом, при этом контрабас без дублировки. Так иногда приходится делать из-за очень низкого регистра контрабаса при отсутствии контрафагота."
+    },
+    {
+      "id": "MG07",
+      "category": "melody_mixed",
+      "severity": "warning",
+      "applies_to": [
+        "strings",
+        "horn_f"
+      ],
+      "check": "strings_plus_brass_blend",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Струнные и медь не дают полного слияния: в унисоне слышны оба тембра. Лучше всего сочетаются инструменты с близкими регистрами: скрипка + труба, альт + валторна. Сочетание валторны и виолончели используют часто, оно даёт прекрасный мягкий слитный звук.",
+      "chamber_note": "Для нашего состава рабочие пары: валторна + альт, валторна + виолончель."
+    },
+    {
+      "id": "MG08",
+      "category": "melody_mixed",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "three_groups_unison",
+      "source": "Ch. II (Melody), later sections",
+      "description_ru": "Сочетание трёх групп в унисон даёт более полный и ровный звук благодаря деревянным. Какой тембр доминирует, зависит от числа инструментов. Типичные сочетания: скрипки + гобой (флейта, кларнет) + труба; альт или виолончель + кларнет (английский рожок) + валторна. Их используют в громких местах или для тяжёлого пиано.",
+      "chamber_note": "Для среднего регистра: альт или виолончель + кларнет + валторна."
+    },
+    {
+      "id": "OR01",
+      "category": "orchestration_planning",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "phrase_function",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Выбор оркестровки зависит от замысла: от формы произведения, роли отрывка (дополнение, контраст, кульминация или промежуточный шаг) и красок соседних фрагментов. Планировщик должен сначала определить функцию фразы, и только потом назначать инструменты."
+    },
+    {
+      "id": "OR02",
+      "category": "orchestration_planning",
+      "severity": "hint",
+      "applies_to": [
+        "horn_f",
+        "oboe",
+        "clarinet_bb"
+      ],
+      "check": "fanfare_fallback",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Если фанфарная фигура слишком низка для трубы, её отдают валторнам (родственным трубе); если слишком высока, гобою и кларнету в унисон, поскольку по характеру и силе они ближе всего к трубе. Число инструментов определяется нужной мощностью: для большого звука их удваивают и больше, для небольшого достаточно одного соло или двух деревянных (гобой + кларнет).",
+      "chamber_note": "В составе нет труб: фанфарные фигуры отдаются валторне, а в высоком регистре паре гобой + кларнет."
+    },
+    {
+      "id": "OR03",
+      "category": "orchestration_planning",
+      "severity": "warning",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "harmony_color_differs_from_melody",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Гармоническая основа должна отличаться от мелодии не только полнотой и силой, но и красками. Если фанфарную фигуру ведёт медь (труба, валторна), гармонию поручают деревянным; если фразу ведут деревянные (гобои, кларнеты), гармонию поручают валторнам. Если нужно чёткое разделение мелодии и основы, лучше обойтись без духовой гармонии и выровнять баланс динамикой."
+    },
+    {
+      "id": "OR04",
+      "category": "orchestration_planning",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "vary_orchestration_on_repeat",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Повторяющуюся мысль оркеструют каждый раз по-разному, чтобы получить разнообразие краски или силы звука. Способы: полный или частичный перенос в другие октавы; повторение в другой тональности; расширение диапазона добавлением октав сверху и снизу; изменение деталей (самый частый способ); изменение динамической схемы (например, повторить пиано то, что было форте)."
+    },
+    {
+      "id": "OR05",
+      "category": "tutti",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "tutti_dynamics",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Тутти применяется по существу в форте и фортиссимо, редко в пиано. Полное тутти означает участие всех мелодических групп (струнные, духовые, медь). Тутти из деревянных и валторн не даёт большой силы в форте, тогда как медь одна способна дать огромную мощность. Виолончели и контрабасы, играющие пиццикато, часто добавляют к духовому тутти: от этого выдержанные ноты в духовых становятся отчётливее.",
+      "chamber_note": "В нашем составе мощности ограничены: пик громкости достигается сочетанием всех групп."
+    },
+    {
+      "id": "OR06",
+      "category": "solos",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "solo_accompaniment_lightness",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Соло духовых обычно поручают первому инструменту группы. Соло струнных встречаются реже: скрипка и виолончель довольно часто, альт редко, контрабас практически никогда. Слабый звук соло требует лёгкого прозрачного аккомпанемента. Сложные виртуозные соло писать не следует, они слишком привлекают внимание.",
+      "chamber_note": "Вывод (не из книги): в нашем камерном составе каждый инструмент по сути солист, поэтому лёгкий прозрачный аккомпанемент нужен всегда, когда мелодию ведёт струнный."
+    },
+    {
+      "id": "OR07",
+      "category": "orchestral_range",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "extreme_register_harmony",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Весь замысел редко сосредоточен в самом верхнем или в самом нижнем регистре; в самом низком близость гармонических интервалов даёт плохой эффект. В верхнем регистре звучание блестящее (флейта и верх скрипок), в нижнем тёмное и мрачное (низ фагота, валторны, при наличии контрафагот, бас-кларнет, тромбоны, туба)."
+    },
+    {
+      "id": "OR08",
+      "category": "orchestral_range",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "wide_gap_between_outer_parts",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Верхние и нижние партии редко можно сильно разводить, не заполняя промежуточные октавы: это противоречит основам распределения аккордов. Такая необычная звучность допустима лишь для причудливых и гротескных эффектов."
+    },
+    {
+      "id": "OR09",
+      "category": "orchestral_technique",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "phrase_handover_overlap",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Передача фразы от инструмента к инструменту: последняя нота одной партии совпадает с первой нотой следующей. Применяют, когда диапазон слишком широк для одного инструмента или когда фразу нужно разделить на два тембра. При разделении сквозной фразы нужно сохранять общий баланс."
+    },
+    {
+      "id": "OR10",
+      "category": "orchestral_technique",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "alternating_chords_voice_leading",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "При чередовании аккордов разных групп голосоведение должно оставаться таким же правильным, как будто скачков между октавами и группами нет; особенно в хроматических ходах, чтобы не возникала ложная связь. Исключение: намеренный крайний контраст тембров. Хороший приём: один и тот же аккорд (или его обращение) передаётся от одной группы к другой в том же расположении, в той же или в другой октаве, динамика при этом может быть разной."
+    },
+    {
+      "id": "OR11",
+      "category": "orchestral_technique",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "crescendo_by_adding_groups",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Протяжённое крещендо получают постепенным вводом инструментов в порядке: струнные, деревянные, медь; диминуэндо уходом групп в обратном порядке. Вторая группа вступает пиано и набирает силу быстрее первой, из-за чего процесс напряжённее. Кларнет особенно хорош в диминуэндо до шёпота, медь после струнных лучше всего даёт нюансы силы.",
+      "chamber_note": "Для нашего состава порядок: струнные, деревянные, валторна."
+    },
+    {
+      "id": "OR12",
+      "category": "orchestral_technique",
+      "severity": "warning",
+      "applies_to": [
+        "planner",
+        "validator"
+      ],
+      "check": "imitation_and_echo",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Имитация: если фраза имитируется в верхнем регистре, её отдают более высокому инструменту, и наоборот; иначе возникает неестественный эффект (кларнет в верхе отвечает гобою в низу). Эхо: второй инструмент слабее первого, но родственный по тембру. Валторна с сурдиной хорошо эхом повторяет несурдинную фразу, флейта может имитировать кларнет и гобой. Деревянные нельзя использовать как эхо струнных и наоборот из-за несходства тембров. Имитация в октаву с убыванием силы тоже напоминает эхо.",
+      "chamber_note": "Эхо у валторны с сурдиной в ответ гобою и кларнету работает; эхо между струнными и духовыми избегать."
+    },
+    {
+      "id": "OR13",
+      "category": "orchestral_technique",
+      "severity": "hint",
+      "applies_to": [
+        "strings",
+        "winds"
+      ],
+      "check": "accent_by_string_sforzando",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Акценты можно создавать оркестровкой: в начале пиано-аккорда деревянных струнные дают sforzando (желательно сложный аккорд, смычком или пиццикато); если нужен акцент в конце, он ставится в конце аккорда духовых. Первый способ используют для sf-diminuendo, второй для crescendo-sf. Для выделения ноты можно вставлять в мелодию короткие аккорды струнного квартета, где каждый играет по одной ноте, или короткие ноты деревянных, или цепочку из трёх-четырёх форшлагов-гамм (в струнных без перехода в трёх-четырёхзвучные аккорды, это неудобно для смычка).",
+      "chamber_note": "Акцентный аккорд квартета из одиночных струнных вполне исполним, так как каждая партия играет по одной ноте."
+    },
+    {
+      "id": "OR14",
+      "category": "orchestral_technique",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "diverging_converging_progressions",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Расходящиеся и сходящиеся голосоведения: при расхождении три верхних голоса идут вверх, бас вниз, и промежуток заполняется постепенно вводимыми новыми голосами. При схождении удвоения упрощаются по мере ухода дублирующих инструментов; сохраняют группу в середине, которая остаётся неподвижной, или выдержанный звук для единства процесса."
+    },
+    {
+      "id": "OR15",
+      "category": "orchestral_technique",
+      "severity": "warning",
+      "applies_to": [
+        "planner",
+        "validator"
+      ],
+      "check": "timbre_contrast_for_nonharmonic_notes",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Чем сильнее различаются тембры гармонической основы и мелодического рисунка, тем менее резко звучат чуждые гармонии ноты (форшлаги, проходящие). Наибольший контраст даёт сочетание голоса с оркестром, затем струнные, деревянные и щипковые, слабее разница между деревянными и медью. Для двух последних групп основу держат в стороне на октаву и с меньшей силой. Строгого правила допустимой длительности чуждых нот нет.",
+      "chamber_note": "При украшенной мелодии над стабильной основой выбирать контрастные группы, например мелодия у деревянных, основа у струнных."
+    },
+    {
+      "id": "EC01",
+      "category": "economy",
+      "severity": "hint",
+      "applies_to": [
+        "planner"
+      ],
+      "check": "orchestral_color_economy",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Ухо и музыкальное чувство быстро устают от постоянного использования всех красок. Группа, которая долго молчала, при возвращении звучит свежо. Самые частые группы: струнные, затем деревянные, затем медь; редкие тембры (рояль, колокольчики, ксилофон) слишком характерны, чтобы использовать их часто."
+    },
+    {
+      "id": "EC02",
+      "category": "economy",
+      "severity": "warning",
+      "applies_to": [
+        "horn_f"
+      ],
+      "check": "reentry_after_long_rest",
+      "source": "Ch. IV (Composition of the orchestra)",
+      "description_ru": "Вступление меди после долгой паузы должно совпадать с яркой характерной силой звука: pp или ff; piano и forte менее удачны, а mezzo-forte и mezzo-piano дают бесцветный, банальный эффект. Тем же объясняется, почему не стоит начинать или заканчивать произведение на mf или mp.",
+      "chamber_note": "Применимо к валторне как единственному представителю меди."
+    },
+    {
+      "id": "HM32",
+      "category": "harmony",
+      "severity": "error",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "no_parallel_fifths_outer_voices",
+      "description_ru": "Параллельные квинты между любыми двумя голосами, движущимися в одном направлении, недопустимы.",
+      "source": "Classical practice; corpus check",
+      "corpus_check": {
+        "status": "supported_with_exceptions",
+        "data": "Parallel fifths in similar motion: about 0.6-1.2% of such moves depending on the pair (analysis includes ornamental and passing notes, so this overcounts).",
+        "conclusion": "Квинты редки, но не отсутствуют. Для генерируемой оркестровки оставить жёстким правилом (ошибка), в оценке чужих партитур как предупреждение.",
+        "corrected": "2026-10-22: earlier figure (0.1-0.5%) came from a faulty interval check that only counted one direction."
+      }
+    },
+    {
+      "id": "QX01",
+      "category": "quality_check",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "monotony_repeated_notes",
+      "description_ru": "Если больше половины нот партии повторяют предыдущую (короткие длительности), партия монотонна: такие ноты лучше соединять в длинные или давать фигурацию. Половинные и более длинные ноты (ритм баса) не считаются.",
+      "source": "Author heuristic (not from Rimsky-Korsakov); orchestrator merges repeated inner-voice notes",
+      "status": "implemented"
+    },
+    {
+      "id": "QX02",
+      "category": "quality_check",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "dynamics_present",
+      "description_ru": "В партитуре должна быть динамика. Оркестратор v0.2 расставляет её по тактам по высоте мелодии (выше значит громче).",
+      "source": "Author heuristic",
+      "status": "implemented"
+    },
+    {
+      "id": "QX03",
+      "category": "quality_check",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "transposition_written_form",
+      "description_ru": "Кларнет in B♭, валторна in F и контрабас должны быть записаны в транспонированном виде. Проверка: у партии объявлена транспозиция и нота записана иначе, чем звучит.",
+      "source": "Standard notation practice; verified on MusicXML",
+      "status": "implemented"
+    },
+    {
+      "id": "QX04",
+      "category": "quality_check",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "wind_run_without_rest",
+      "description_ru": "Духовые не должны играть без пауз слишком долго (порог 16 долей, это моя эвристика). Оркестратор убирает такт внутреннего голоса, чтобы дать паузу, но мелодию не трогает.",
+      "source": "W01 (Ch. I) + author threshold",
+      "status": "implemented"
+    },
+    {
+      "id": "QX05",
+      "category": "quality_check",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "unison_doubling_density",
+      "description_ru": "Плотность дублирования: число одновременно звучащих нот на одну различную высоту, считается на каждой доле. В 25 квартетах классиков среднее 1,06 (максимум 1,54). Порог предупреждения 1,35 это моя эвристика. Намеренное дублирование мелодии учитывается, поэтому порог выше квартетного среднего.",
+      "source": "Author heuristic anchored on 25 Haydn/Mozart/Beethoven quartets; not validated further",
+      "status": "implemented"
+    },
+    {
+      "id": "QX06",
+      "category": "quality_check",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "unused_instrument",
+      "description_ru": "Инструмент состава, который не сыграл ни одной ноты, считается ошибкой планирования (в предыдущей версии валторна молчала весь отрывок Моцарта).",
+      "source": "Author heuristic",
+      "status": "implemented"
+    },
+    {
+      "id": "QX07",
+      "category": "quality_check",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "idiomatic_speed",
+      "description_ru": "Доля слишком быстрых нот для инструмента: контрабас и валторна не короче половины доли, фагот и виолончель не короче четверти доли. Если таких нот больше 15%, предупреждение. Пороги эвристические, не из книги.",
+      "source": "Author heuristic",
+      "status": "implemented"
+    },
+    {
+      "id": "QX08",
+      "category": "quality_check",
+      "severity": "warning",
+      "applies_to": [
+        "validator"
+      ],
+      "check": "stable_instrument_count",
+      "description_ru": "Число одновременно играющих инструментов не должно скакать от такта к такту более чем на 4 (иначе слушатель теряет ощущение состава). Порог эвристический.",
+      "source": "Author heuristic",
+      "status": "implemented"
+    }
+  ],
+  "balance_parameters": {
+    "winds_forte": {
+      "value": "1 horn ~ 2 clarinets ~ 2 oboes ~ 2 flutes ~ 2 bassoons",
+      "source": "Ch. I, comparison of resonance",
+      "chamber_usage": "Может использоваться как есть для духовых, но в камерном составе по одному инструменту нужен пересчёт."
+    },
+    "winds_piano": {
+      "value": "all winds roughly equal",
+      "source": "Ch. I, comparison of resonance"
+    },
+    "strings_vs_winds": {
+      "value": "medium orchestra: whole section of violins I ~ 1 flute (piano), ~ 2 winds (forte)",
+      "source": "Ch. I, comparison of resonance",
+      "chamber_usage": "НЕ применять напрямую: рассчитано на секции из 8 и более скрипок. Для солистов по одному на партию откалибровать на слух."
+    }
+  },
+  "unison_combinations_woodwinds": [
+    {
+      "pair": [
+        "flute",
+        "oboe"
+      ],
+      "result_ru": "Полнее флейты и мягче гобоя; в низком регистре преобладает флейта, в высоком гобой."
+    },
+    {
+      "pair": [
+        "flute",
+        "clarinet_bb"
+      ],
+      "result_ru": "Полнее флейты и глуше кларнета; флейта преобладает внизу, кларнет вверху."
+    },
+    {
+      "pair": [
+        "oboe",
+        "clarinet_bb"
+      ],
+      "result_ru": "Полнее каждого по отдельности; гобой доминирует внизу, кларнет вверху."
+    },
+    {
+      "trio": [
+        "flute",
+        "oboe",
+        "clarinet_bb"
+      ],
+      "result_ru": "Очень полный звук; внизу ведёт флейта, посередине гобой, вверху кларнет."
+    },
+    {
+      "pair": [
+        "bassoon",
+        "clarinet_bb"
+      ],
+      "result_ru": "Полный тембр; внизу доминирует кларнет, вверху фагот."
+    },
+    {
+      "group": [
+        "bassoon+oboe",
+        "bassoon+flute"
+      ],
+      "result_ru": "Встречаются редко, в основном в тутти для усиления без новой краски."
+    }
+  ],
+  "instrument_character": {
+    "note": "Ориентиры для планировщика, а не жёсткие правила. Из книги: настроение определяется не одним тембром, а мелодией, гармонией, ритмом и динамикой.",
+    "flute": {
+      "mid_high": "холодный, лёгкий; в мажоре грациозные мелодии, в миноре мимолётная печаль",
+      "low": "тусклый, холодный",
+      "very_high": "блестящий"
+    },
+    "oboe": {
+      "mid_high": "простодушный и весёлый в мажоре, патетичный и печальный в миноре",
+      "low": "резкий, дикий",
+      "very_high": "жёсткий, сухой"
+    },
+    "clarinet_bb": {
+      "mid_high": "гибкий, выразительный; радость и созерцание в мажоре, печаль и драматизм в миноре; может звучать почти шёпотом",
+      "low": "звенящий, угрожающий",
+      "very_high": "пронзительный"
+    },
+    "bassoon": {
+      "mid_high": "ироничный в мажоре, болезненно печальный в миноре",
+      "low": "зловещий",
+      "very_high": "напряжённый"
+    }
+  },
+  "caveats": [
+    "Источник написан для большого позднеромантического оркестра (русская школа, яркая красочность). Числовые пропорции для крупных секций в камерном составе пересчитывать.",
+    "Автор считал оркестровку произведения, изначально не предназначенного для оркестра, нежелательной практикой. Это его мнение, но оно объясняет, почему в книге нет рецептов для нашей задачи.",
+    "Автор не рекомендовал учиться оркестровке на классицизме (Моцарт, Гайдн); для классического стиля нужны другие источники.",
+    "Автор подчёркивал, что оркестровка это творчество и не сводится к формулам. Правила задают границы допустимого, выбор остаётся за планировщиком и пользователем."
+  ],
+  "pending": [
+    "Таблицы диапазонов (Tables A, B, C): в источнике даны картинками, нужны из проверенного справочника.",
+    "Музыкальные примеры (том II) и таблицы распределения аккордов: в текстовой версии отсутствуют, правила основаны только на тексте.",
+    "Пороговые значения (null в params) подобрать на слух и по эталонам.",
+    "Калибровка баланса для состава по одному исполнителю: числа книги даны для больших секций.",
+    "Для классического стиля (Гайдн, Моцарт) нужны другие источники: автор книги не считал классику хорошей школой для оркестровки."
+  ],
+  "chamber_adaptation_summary": {
+    "problem": "Правила главы III написаны для оркестра с парами и тройками духовых и большими секциями струнных. В камерном составе по одному исполнителю на партию (одна флейта, один гобой, один кларнет, один фагот, одна валторна, по одному струнному) парных тембров нет.",
+    "implications": [
+      "Четырёхголосный аккорд из деревянных получает четыре разных тембра (автор считает это неизбежным для такого состава).",
+      "Для тесного расположения и для получения пар нужно подключать струнные или валторну.",
+      "Divisi невозможно; середина заполняется двойными нотами.",
+      "Соотношения сил для больших секций струнных не переносятся: баланс калибровать на слух.",
+      "Валторна в форте перекрывает отдельный деревянный инструмент."
+    ],
+    "status": "adaptation_not_from_source_except_noted"
+  }
+}
