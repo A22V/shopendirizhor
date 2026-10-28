@@ -70,6 +70,10 @@ def analyze(path):
         if cur is None or midi > cur[0]:
             sky[on] = (midi, off_ - on)
     melody = [{"offset": on, "dur": dur, "pitch": midi} for on, (midi, dur) in sorted(sky.items())]
+    for i in range(len(melody) - 1):                 # trim each melody note so it never overlaps the next one
+        gap = melody[i + 1]["offset"] - melody[i]["offset"]
+        if melody[i]["dur"] > gap:
+            melody[i]["dur"] = gap
     mel_on = [m["offset"] for m in melody]
     def melody_at(b):
         i = bisect.bisect_right(mel_on, b + 0.999) - 1
@@ -257,6 +261,40 @@ def enforce_breath(lines, meta, log):
 
 
 ENABLE_WIND_BREATHS = False
+def fix_bass_fifths(lines, log):
+    """HM32 in the bass: if cello and double bass form a parallel fifth, move the double bass by an octave."""
+    cel = sorted(lines.get("Cello", []), key=lambda n: n[0])
+    db = sorted(lines.get("Double Bass", []), key=lambda n: n[0])
+    if not cel or not db: return
+    lo, hi = RANGES[KEY["Double Bass"]]
+    def at(seq, off):
+        best = None
+        for n in seq:
+            if n[0] <= off + 1e-9: best = n
+        return best
+    for i in range(len(db)):
+        off = db[i][0]
+        c_now, d_now = at(cel, off), db[i]
+        if c_now is None: continue
+        prev_off = db[i - 1][0] if i > 0 else None
+        if prev_off is None: continue
+        c_prev, d_prev = at(cel, prev_off), db[i - 1]
+        if c_prev is None or c_prev is c_now: continue
+        dx = c_now[2] - c_prev[2]; dy = d_now[2] - d_prev[2]
+        if dx and dx == dy and abs(d_prev[2] - c_prev[2]) % 12 == 7 and abs(d_now[2] - c_now[2]) % 12 == 7:
+            # an octave does not change the interval class, so move the note by a small step instead
+            options = []
+            for k in (-2, 2, -3, 3, -4, 4, -5, 5, -1, 1):
+                cand = d_now[2] + k
+                if not (lo <= cand <= hi): continue
+                if abs(cand - c_now[2]) % 12 == 7 or abs(cand - c_now[2]) % 12 == 0: continue
+                if abs(cand - d_prev[2]) % 12 == 0 and d_prev is not None: pass
+                options.append(cand)
+            if options:
+                db[i][2] = options[0]
+                log["bass_fifths_fixed"] = log.get("bass_fifths_fixed", 0) + 1
+    lines["Double Bass"] = db
+
 BREATH_RUN_LIMIT = 10.0   # beats of continuous wind playing before a breath (validator limit is 16)
 
 def enforce_wind_breaths(lines, log):
@@ -330,7 +368,14 @@ def realize(s, events, melody, meta, plan):
             if role in v: put(e["offset"], e["dur"], v[role], role)
     for f in meta["fig"]: put(f["offset"], f["dur"], f["pitch"], "figuration")
     for name in lines: lines[name].sort(key=lambda n: n[0])
+    for name, seq in lines.items():                  # a single instrument can't sound two notes at once
+        for i in range(len(seq) - 1):
+            gap = seq[i + 1][0] - seq[i][0]
+            if seq[i][1] > gap:
+                seq[i][1] = max(gap, 0.0)
+        lines[name] = [n for n in seq if n[1] > 1e-6]
     merge_sustains(lines, meta, log)
+    fix_bass_fifths(lines, log)
     enforce_breath(lines, meta, log)
     if ENABLE_WIND_BREATHS:
         enforce_wind_breaths(lines, log)   # off by default: it created parallel fifths (HM32) in tests
@@ -384,6 +429,7 @@ def build_score(s, lines, dyn, piano_mode="off", meta=None):
             n.volume = volume.Volume(velocity=v); n.volume.velocityIsRelative = False
             p.insert(off, n)
         p.makeMeasures(inPlace=True)
+        p.makeTies(inPlace=True)   # split notes that cross a barline into tied pieces (keeps exact rhythm, including tuplets)
         out.insert(0, p)
     add_dynamics(out, dyn)
     # explicit key signature per part: concert key from the piece, written key = concert key transposed
