@@ -11,6 +11,16 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 import orchestrator          # noqa: E402
 import validator             # noqa: E402
 import audio_tools           # noqa: E402
+import llm_planner           # noqa: E402
+
+try:
+    for _k, _v in st.secrets.items():          # keys from Streamlit "Secrets" become environment variables
+        if isinstance(_v, str):
+            os.environ.setdefault(_k, _v)
+except Exception:
+    pass
+PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
+LLM_READY = bool(PROVIDER and PROVIDER_KEY and PROVIDER_MODEL)
 
 st.set_page_config(page_title="Шопендирижёр", page_icon="🎼", layout="centered")
 
@@ -65,18 +75,28 @@ st.markdown("### 1. Загрузите пьесу")
 up = st.file_uploader("MIDI-файл (.mid, .midi)", type=["mid", "midi"], accept_multiple_files=False)
 
 st.markdown("### 2. Оркестровать")
+use_llm = False
+if LLM_READY:
+    use_llm = st.checkbox("Оркестровать по плану модели (%s)" % PROVIDER, value=True,
+                          help="Модель пишет план по смыслу фраз, программа проверяет его.")
 go = st.button("Создать оркестровку", disabled=up is None, use_container_width=True)
 
 
-def process(data: bytes, name: str):
+def process(data: bytes, name: str, use_llm_flag: bool = False):
     """Runs the full pipeline in a private temporary folder and returns the list of result files."""
     work = tempfile.mkdtemp(prefix="shopendirizhor_")
     src = os.path.join(work, "input.mid")
     with open(src, "wb") as f:
         f.write(data)
     stem = os.path.join(work, "result")
-    log, issues, names = orchestrator.run(src, stem, "off", None)
-    plan = json.load(open(stem + "_plan.json", encoding="utf-8"))
+    llm_log = None
+    if use_llm_flag:
+        log, issues, names, llm_log, _pp = llm_planner.orchestrate_with_llm(
+            src, stem, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY)
+        plan = json.load(open(_pp, encoding="utf-8"))
+    else:
+        log, issues, names = orchestrator.run(src, stem, "off", None)
+        plan = json.load(open(stem + "_plan.json", encoding="utf-8"))
     report = json.load(open(stem + "_report.json", encoding="utf-8"))
     mp3 = None
     try:
@@ -84,7 +104,7 @@ def process(data: bytes, name: str):
         mp3 = out if os.path.exists(out) else None
     except Exception:
         mp3 = None
-    return {"work": work, "stem": stem, "plan": plan, "report": report, "issues": issues,
+    return {"work": work, "stem": stem, "plan": plan, "report": report, "issues": issues, "llm_log": llm_log,
             "mp3": mp3, "name": os.path.splitext(name)[0]}
 
 
@@ -94,7 +114,7 @@ if go and up is not None:
     else:
         with st.spinner("Оркестровка выполняется. Обычно это занимает меньше минуты..."):
             try:
-                st.session_state.result = process(up.getvalue(), up.name)
+                st.session_state.result = process(up.getvalue(), up.name, use_llm_flag=use_llm)
             except Exception as e:
                 st.session_state.result = None
                 st.error("Не удалось обработать файл. Проверьте, что это сольная фортепианная пьеса в MIDI с ровным ритмом.")
@@ -109,6 +129,8 @@ if res:
     else:
         st.info("Звуковая запись сейчас недоступна на сервере. Скачайте MIDI и откройте его в программе для музыки.")
 
+    if res.get("llm_log"):
+        st.info("План написала модель %s. Проверок плана: %d." % (PROVIDER, len(res["llm_log"])))
     issues = res["issues"]
     errors = [i for i in issues if i[0] == "error"]
     warns = [i for i in issues if i[0] == "warning"]
