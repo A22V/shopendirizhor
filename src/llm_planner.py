@@ -91,6 +91,8 @@ def check_plan(plan, n_bars):
         if not (1 <= a <= b <= n_bars):
             problems.append("phrase %s bars %s outside 1..%d" % (ph.get("id"), [a, b], n_bars))
         covered.update(range(a, b + 1))
+        if ph.get("level") not in ("mp", "mf", "f"):
+            problems.append("phrase %s: level must be mp, mf or f" % ph.get("id"))
         for role in ("melody", "bass", "inner1", "inner2", "figuration"):
             for spec in ph.get(role, []) or []:
                 if spec[0] not in INSTRUMENTS:
@@ -166,3 +168,18 @@ def configured_provider():
     key = os.environ.get(KEY_VARS[p], "")
     model = os.environ.get("PLANNER_MODEL", "").strip()
     return p, key, model
+
+
+def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_model):
+    """Full path: analyse the piece, ask the model for a plan, check it, then run the orchestrator with that plan.
+    Returns (run_log, issues, names, llm_log, plan_path)."""
+    import orchestrator as o
+    s, events, melody, meta = o.analyze(in_path)
+    n_bars = len(meta["bars"])
+    description = describe_piece(meta, melody, events, n_bars)
+    plan, llm_log = plan_with_model(provider, model, api_key, description, n_bars, call=call)
+    plan_path = out_stem + "_llm_plan.json"
+    with open(plan_path, "w", encoding="utf-8") as f:
+        json.dump(plan, f, ensure_ascii=False, indent=1)
+    log, issues, names = o.run(in_path, out_stem, "off", plan_path)
+    return log, issues, names, llm_log, plan_path
