@@ -531,6 +531,7 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None):
     except Exception as e:
         log["loudness_balance"] = {"error": str(e)}
     written = snd.toWrittenPitch(inPlace=False)
+    add_dynamics(written, dyn)   # dynamics must be written into the MusicXML too (MuseScore shows them)
     written.write("musicxml", fp=out_stem + ".musicxml")
     issues, names = validator.check_score(out_stem + ".musicxml")
     json.dump({"plan_log": log, "issues": issues}, open(out_stem + "_report.json", "w", encoding="utf-8"),
