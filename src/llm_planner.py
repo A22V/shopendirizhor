@@ -170,16 +170,63 @@ def configured_provider():
     return p, key, model
 
 
-def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_model):
-    """Full path: analyse the piece, ask the model for a plan, check it, then run the orchestrator with that plan.
-    Returns (run_log, issues, names, llm_log, plan_path)."""
+
+def _bar_of_beat(offset, meta):
+    starts = [b[0] for b in meta["bars"]]
+    idx = max(0, sum(1 for s in starts if s <= offset + 1e-9) - 1)
+    return idx + 1
+
+
+def validator_feedback(issues, meta):
+    """Turn validator output into plain sentences with bar numbers, for the model to fix."""
+    lines = []
+    for sev, rid, off, msg in issues:
+        if sev != "error" and rid not in ("QX06", "QX04"):
+            continue
+        where = " (bar %d)" % _bar_of_beat(off, meta) if isinstance(off, (int, float)) else ""
+        lines.append("%s %s: %s%s" % ("ERROR" if sev == "error" else "problem", rid, msg, where))
+    return lines
+
+
+def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_model, max_rounds=3):
+    """Model writes the plan, the orchestrator builds it, the validator checks it, and the model gets the
+    validator's findings to fix. Keeps the best attempt. Returns (run_log, issues, names, attempts, plan_path)."""
     import orchestrator as o
     s, events, melody, meta = o.analyze(in_path)
     n_bars = len(meta["bars"])
     description = describe_piece(meta, melody, events, n_bars)
-    plan, llm_log = plan_with_model(provider, model, api_key, description, n_bars, call=call)
-    plan_path = out_stem + "_llm_plan.json"
-    with open(plan_path, "w", encoding="utf-8") as f:
-        json.dump(plan, f, ensure_ascii=False, indent=1)
-    log, issues, names = o.run(in_path, out_stem, "off", plan_path)
-    return log, issues, names, llm_log, plan_path
+    attempts, best, user = [], None, description
+    for r in range(1, max_rounds + 1):
+        text = call(provider, model, api_key, SYSTEM, user)
+        try:
+            plan = parse_plan(text)
+        except Exception as e:
+            problems = ["answer is not valid JSON: %s" % e]
+        else:
+            problems = check_plan(plan, n_bars)
+        if problems:
+            attempts.append({"round": r, "structure": problems})
+            user = description + "\n\nYour plan has these structural problems, fix them and answer with JSON only:\n- " + "\n- ".join(problems)
+            continue
+        stem = "%s_r%d" % (out_stem, r)
+        plan_path = stem + "_llm_plan.json"
+        with open(plan_path, "w", encoding="utf-8") as f:
+            json.dump(plan, f, ensure_ascii=False, indent=1)
+        log, issues, names = o.run(in_path, stem, "off", plan_path)
+        errors = [i for i in issues if i[0] == "error"]
+        silent = [i for i in issues if i[1] == "QX06"]
+        score = 10 * len(errors) + 2 * len(silent) + sum(1 for i in issues if i[0] == "warning")
+        feedback = validator_feedback(issues, meta)
+        attempts.append({"round": r, "errors": len(errors), "score": score, "feedback": feedback})
+        if best is None or score < best["score"]:
+            best = {"score": score, "plan_path": plan_path, "issues": issues, "log": log}
+        if not errors and not silent:
+            break
+        user = (description + "\n\nThe previous plan was built and checked. Problems found:\n- " +
+                "\n- ".join(feedback) +
+                "\nFix them: avoid parallel fifths between voices, give every instrument a part, "
+                "keep each instrument in its range, answer with JSON only.")
+    if best is None:
+        raise RuntimeError("planner produced no valid plan: %s" % attempts[-1])
+    log, issues, names = o.run(in_path, out_stem, "off", best["plan_path"])
+    return log, issues, names, attempts, best["plan_path"]
