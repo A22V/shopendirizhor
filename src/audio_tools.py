@@ -19,9 +19,10 @@ def find_soundfont():
     env = os.environ.get("SOUNDFONT")
     if env and os.path.isfile(env):
         return env
-    local = sorted(glob.glob(os.path.join(ROOT, "soundfonts", "*.sf2")), key=lambda f: -os.path.getsize(f))
+    local = sorted(glob.glob(os.path.join(ROOT, "soundfonts", "*.sf2")) + glob.glob(os.path.join(ROOT, "soundfonts", "*.sf3")),
+                   key=lambda f: -os.path.getsize(f))
     others = ["/usr/share/sounds/sf2/FluidR3_GM.sf2", "/usr/share/soundfonts/FluidR3_GM.sf2",
-              "/opt/homebrew/share/soundfonts/default.sf2", "/usr/share/sounds/sf2/TimGM6mb.sf2"]
+              "/opt/homebrew/share/soundfonts/default.sf2", "/usr/share/sounds/sf2/TimGM6mb.sf2", "/usr/share/sounds/sf3/MuseScore_General.sf3"]
     for c in local + others:
         if os.path.isfile(c):
             return c
