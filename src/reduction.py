@@ -58,7 +58,7 @@ def reduce_to_piano(in_path, out_path, max_rh=MAX_RH, max_lh=MAX_LH):
     out = mido.MidiFile(type=1, ticks_per_beat=tpb)
     head = mido.MidiTrack(); out.tracks.append(head)
     for m in tempo_msgs: head.append(m.copy(time=m.time))
-    for name, ch, events in (("Piano RH", 0, rh_ev), ("Piano LH", 1, lh_ev)):
+    for name, ch, events in (("Piano", 0, sorted(rh_ev + lh_ev, key=lambda e: (e[0], e[2]))),):   # one piano part: MuseScore splits it into two staves
         tr = mido.MidiTrack(); out.tracks.append(tr)
         tr.append(mido.MetaMessage("track_name", name=name, time=0))
         ev = []
@@ -173,7 +173,7 @@ def reduce_with_keep_plan(in_path, out_path, keep_plan):
     out = mido.MidiFile(type=1, ticks_per_beat=tpb)
     head = mido.MidiTrack(); out.tracks.append(head)
     for m in tempo_msgs: head.append(m.copy(time=m.time))
-    for name, ch, events in (("Piano RH", 0, rh_ev), ("Piano LH", 1, lh_ev)):
+    for name, ch, events in (("Piano", 0, sorted(rh_ev + lh_ev, key=lambda e: (e[0], e[2]))),):   # one piano part: MuseScore splits it into two staves
         tr = mido.MidiTrack(); out.tracks.append(tr)
         tr.append(mido.MetaMessage("track_name", name=name, time=0))
         ev = []
