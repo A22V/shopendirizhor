@@ -49,10 +49,8 @@ st.markdown("<h1>Шопендирижёр</h1>", unsafe_allow_html=True)
 st.markdown("<p class='motto'>Фортепианная пьеса — оркестровый наряд</p>", unsafe_allow_html=True)
 
 st.markdown("""<div class='frame'>
-<b>Что делает эта программа.</b> Вы загружаете сольную фортепианную пьесу в формате MIDI.
-Программа разбирает её на фразы и раскладывает по инструментам камерного состава:
-флейта, гобой, кларнет, фагот, валторна, скрипки, альт, виолончель, контрабас.
-На выходе — MIDI с отдельной дорожкой на каждый инструмент, нотный файл (MusicXML) и запись для прослушивания.
+<b>Оркестровка.</b> Загрузите сольную фортепианную пьесу в формате MIDI. Программа разберёт её на фразы и распределит по инструментам камерного состава: флейта, гобой, кларнет, фагот, валторна, скрипки, альт, виолончель, контрабас. На выходе: MIDI с дорожкой на каждый инструмент, нотный файл MusicXML и запись для прослушивания.<br><br>
+<b>Переложение для фортепиано.</b> Загрузите оркестровую пьесу в формате MIDI. Программа сведёт все голоса к фортепиано: правая и левая руки, ограниченное число нот в аккорде. На выходе: фортепианный MIDI и запись для прослушивания.
 </div>""", unsafe_allow_html=True)
 
 st.markdown("""<div class='frame warn'>
@@ -75,13 +73,13 @@ if "result" not in st.session_state:
 st.markdown("### 1. Загрузите пьесу")
 up = st.file_uploader("MIDI-файл (.mid, .midi)", type=["mid", "midi"], accept_multiple_files=False)
 
-st.markdown("### 2. Оркестровать")
+st.markdown("### 2. Что сделать")
 use_llm = False
 if LLM_READY:
-    use_llm = st.checkbox("Использовать модель (%s): план оркестровки или выбор голосов в редукции" % PROVIDER, value=True,
+    use_llm = st.checkbox("Помощь модели (%s): план оркестровки или выбор голосов при переложении" % PROVIDER, value=True,
                           help="Модель пишет план по смыслу фраз, программа проверяет его.")
-mode = st.radio("Что сделать", ["Оркестровка", "Редукция в фортепиано"], horizontal=True)
-go = st.button("Создать" if mode == "Оркестровка" else "Сделать редукцию в фортепиано", disabled=up is None, use_container_width=True)
+mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", "Переложение для фортепиано (из оркестра)"], horizontal=True)
+go = st.button("Создать оркестровку" if mode == "Оркестровка (из фортепиано)" else "Создать переложение", disabled=up is None, use_container_width=True)
 
 
 def process(data: bytes, name: str, use_llm_flag: bool = False):
@@ -110,7 +108,7 @@ def process(data: bytes, name: str, use_llm_flag: bool = False):
             "mp3": mp3, "name": os.path.splitext(name)[0]}
 
 
-if go and up is not None and mode == "Редукция в фортепиано":
+if go and up is not None and mode == "Переложение для фортепиано (из оркестра)":
     if up.size > 2 * 1024 * 1024:
         st.error("Файл больше 2 МБ.")
     else:
@@ -153,15 +151,15 @@ elif go and up is not None:
 
 res = st.session_state.result
 if res and res.get("mode") == "reduction":
-    st.markdown("### 3. Результат редукции")
+    st.markdown("### 3. Результат переложения")
     s = res["stats"]
     st.info("Оригинал: %d нот. Фортепиано: правая рука %d, левая %d. "
-            "Покрытие гармонии: %.0f%% классов высот, полное покрытие в %.0f%% моментов."
+            "Сохранено высот гармонии: %.0f%%; в %.0f%% моментов звучат все высоты аккорда."
             % (s["notes_in"], s["notes_rh"], s["notes_lh"], 100 * s["pitch_class_coverage"], 100 * s["full_coverage_share"]))
-    st.caption("Редукция механическая: внутренние голоса в плотных местах удаляются. Это не фортепианная переработка.")
+    st.caption("Переложение механическое: внутренние голоса в плотных местах удаляются. Это не фортепианная переработка.")
     if res["mp3"]:
         st.audio(res["mp3"], format="audio/mpeg")
-    st.download_button("Скачать фортепианную редукцию (MIDI)", open(res["midi"], "rb").read(),
+    st.download_button("Скачать переложение (MIDI)", open(res["midi"], "rb").read(),
                        file_name=res["name"] + "_piano.mid", mime="audio/midi", use_container_width=True)
     res = None
 if res:
