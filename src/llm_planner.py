@@ -230,3 +230,40 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
         raise RuntimeError("planner produced no valid plan: %s" % attempts[-1])
     log, issues, names = o.run(in_path, out_stem, "off", best["plan_path"])
     return log, issues, names, attempts, best["plan_path"]
+
+
+REDUCTION_SYSTEM = (
+    "You reduce an orchestral texture to piano (two hands). You do NOT write notes. For each block of bars you choose "
+    "how many notes each hand may keep at one moment (rh_max 2-6, lh_max 2-5) and which voice to keep when the texture "
+    "is dense: 'balanced' (top and bottom plus inner voices), 'outer' (only the outermost voices), or 'melody' "
+    "(the highest voices). Keep the melody and the bass in every block. Answer with JSON only: "
+    '{"blocks":[{"block":1,"rh_max":4,"lh_max":3,"keep":"balanced"}]}'
+)
+
+
+def reduction_with_model(provider, model, api_key, in_path, out_path, call=call_model, max_rounds=2):
+    """Model picks the keep-plan per block, the code validates it and performs the reduction."""
+    import reduction as R
+    description, n_blocks = R.describe_for_reduction(in_path)
+    user, attempts = description, []
+    for r in range(1, max_rounds + 1):
+        text = call(provider, model, api_key, REDUCTION_SYSTEM, user)
+        try:
+            raw = parse_plan(text)
+        except Exception as e:
+            problems = ["answer is not valid JSON: %s" % e]
+            attempts.append({"round": r, "problems": problems})
+            user = description + "\n\nFix: answer with JSON only. Problem: " + problems[0]
+            continue
+        clean, problems = R.validate_keep_plan(raw, n_blocks)
+        # out-of-range values are clamped by the code, so they are notes, not reasons to discard the plan;
+        # only a plan with no usable blocks at all is asked again
+        attempts.append({"round": r, "notes": problems})
+        if raw.get("blocks"):
+            stats = R.reduce_with_keep_plan(in_path, out_path, clean)
+            return stats, clean, attempts
+        user = description + "\n\nThe answer had no usable blocks. Answer with JSON only, one entry per block."
+    # keep the last clean plan (defaults for any block the model did not fix)
+    clean, _ = R.validate_keep_plan({}, n_blocks)
+    stats = R.reduce_with_keep_plan(in_path, out_path, clean)
+    return stats, clean, attempts
