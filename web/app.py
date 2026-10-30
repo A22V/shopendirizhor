@@ -12,6 +12,7 @@ import orchestrator          # noqa: E402
 import validator             # noqa: E402
 import audio_tools           # noqa: E402
 import llm_planner           # noqa: E402
+import reduction             # noqa: E402
 
 try:
     for _k, _v in st.secrets.items():          # keys from Streamlit "Secrets" become environment variables
@@ -77,9 +78,10 @@ up = st.file_uploader("MIDI-файл (.mid, .midi)", type=["mid", "midi"], accep
 st.markdown("### 2. Оркестровать")
 use_llm = False
 if LLM_READY:
-    use_llm = st.checkbox("Оркестровать по плану модели (%s)" % PROVIDER, value=True,
+    use_llm = st.checkbox("Использовать модель (%s): план оркестровки или выбор голосов в редукции" % PROVIDER, value=True,
                           help="Модель пишет план по смыслу фраз, программа проверяет его.")
-go = st.button("Создать оркестровку", disabled=up is None, use_container_width=True)
+mode = st.radio("Что сделать", ["Оркестровка", "Редукция в фортепиано"], horizontal=True)
+go = st.button("Создать" if mode == "Оркестровка" else "Сделать редукцию в фортепиано", disabled=up is None, use_container_width=True)
 
 
 def process(data: bytes, name: str, use_llm_flag: bool = False):
@@ -108,7 +110,35 @@ def process(data: bytes, name: str, use_llm_flag: bool = False):
             "mp3": mp3, "name": os.path.splitext(name)[0]}
 
 
-if go and up is not None:
+if go and up is not None and mode == "Редукция в фортепиано":
+    if up.size > 2 * 1024 * 1024:
+        st.error("Файл больше 2 МБ.")
+    else:
+        with st.spinner("Делаю редукцию..."):
+            try:
+                _work = tempfile.mkdtemp(prefix="reduction_")
+                _src = os.path.join(_work, "orchestra.mid")
+                with open(_src, "wb") as _f:
+                    _f.write(up.getvalue())
+                _out = os.path.join(_work, "piano_reduction.mid")
+                if use_llm:
+                    _stats = llm_planner.reduction_with_model(PROVIDER, PROVIDER_MODEL, PROVIDER_KEY, _src, _out)[0]
+                else:
+                    _stats = reduction.reduce_to_piano(_src, _out)
+                _mp3 = os.path.join(_work, "piano_reduction.mp3")
+                try:
+                    _mp3 = audio_tools.render_mp3(_out, _mp3)
+                except Exception:
+                    _mp3 = None
+                st.session_state.result = {"mode": "reduction", "stats": _stats, "midi": _out,
+                                           "mp3": _mp3 if _mp3 and os.path.exists(_mp3) else None,
+                                           "name": os.path.splitext(up.name)[0]}
+            except Exception:
+                st.session_state.result = None
+                st.error("Не удалось сделать редукцию. Проверьте, что это MIDI-файл оркестровки.")
+                with st.expander("Подробности для разработчика"):
+                    st.code(traceback.format_exc())
+elif go and up is not None:
     if up.size > 2 * 1024 * 1024:
         st.error("Файл больше 2 МБ. Пожалуйста, загрузите более короткую пьесу.")
     else:
@@ -122,6 +152,18 @@ if go and up is not None:
                     st.code(traceback.format_exc())
 
 res = st.session_state.result
+if res and res.get("mode") == "reduction":
+    st.markdown("### 3. Результат редукции")
+    s = res["stats"]
+    st.info("Оригинал: %d нот. Фортепиано: правая рука %d, левая %d. "
+            "Покрытие гармонии: %.0f%% классов высот, полное покрытие в %.0f%% моментов."
+            % (s["notes_in"], s["notes_rh"], s["notes_lh"], 100 * s["pitch_class_coverage"], 100 * s["full_coverage_share"]))
+    st.caption("Редукция механическая: внутренние голоса в плотных местах удаляются. Это не фортепианная переработка.")
+    if res["mp3"]:
+        st.audio(res["mp3"], format="audio/mpeg")
+    st.download_button("Скачать фортепианную редукцию (MIDI)", open(res["midi"], "rb").read(),
+                       file_name=res["name"] + "_piano.mid", mime="audio/midi", use_container_width=True)
+    res = None
 if res:
     st.markdown("### 3. Результат")
     if res["mp3"]:
