@@ -118,6 +118,18 @@ SYSTEM = (
 )
 
 
+# LLM_CZERNY=1 (OFF by default): Czerny's rules go into the request, and "give every instrument a part" goes out of it.
+# QX06 (an instrument plays nothing) stays a warning: it no longer feeds the retry text and no longer stops the loop.
+# Source: Czerny, School of Practical Composition vol. 3, pp. 22 and 28 (confirmed). "At most 3-4 winds per bar" is the
+# user's wording of the rule; the checker does not enforce it, it is only a hint to the model.
+CZERNY = os.environ.get("LLM_CZERNY") == "1"
+SYSTEM_CZERNY = SYSTEM + (
+    " Rules (Czerny): fast and brilliant passages go to the strings, not to the winds; the horn and the bassoon hold "
+    "long notes, not fast ones; no more than 3-4 winds play in one bar. It is fine and often better for an instrument "
+    "to be silent for a phrase or longer: do not give every instrument a part."
+)
+
+
 def describe_piece(meta, melody, events, n_bars):
     """Compact, plain description of the piece for the model (no full note dump)."""
     lines = ["Bars: %d, time signatures: %s" % (n_bars, meta["tsigs"])]
@@ -146,7 +158,7 @@ def plan_with_model(provider, model, api_key, description, n_bars, max_rounds=3,
     log = []
     user = description
     for round_no in range(1, max_rounds + 1):
-        text = call(provider, model, api_key, SYSTEM, user)
+        text = call(provider, model, api_key, SYSTEM_CZERNY if CZERNY else SYSTEM, user)
         try:
             plan = parse_plan(text)
         except Exception as e:
@@ -181,7 +193,7 @@ def validator_feedback(issues, meta):
     """Turn validator output into plain sentences with bar numbers, for the model to fix."""
     lines = []
     for sev, rid, off, msg in issues:
-        if sev != "error" and rid not in ("QX06", "QX04"):
+        if sev != "error" and rid not in (("QX04",) if CZERNY else ("QX06", "QX04")):
             continue
         where = " (bar %d)" % _bar_of_beat(off, meta) if isinstance(off, (int, float)) else ""
         lines.append("%s %s: %s%s" % ("ERROR" if sev == "error" else "problem", rid, msg, where))
@@ -197,7 +209,7 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
     description = describe_piece(meta, melody, events, n_bars)
     attempts, best, user = [], None, description
     for r in range(1, max_rounds + 1):
-        text = call(provider, model, api_key, SYSTEM, user)
+        text = call(provider, model, api_key, SYSTEM_CZERNY if CZERNY else SYSTEM, user)
         try:
             plan = parse_plan(text)
         except Exception as e:
@@ -214,7 +226,7 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
             json.dump(plan, f, ensure_ascii=False, indent=1)
         log, issues, names = o.run(in_path, stem, "off", plan_path)
         errors = [i for i in issues if i[0] == "error"]
-        silent = [i for i in issues if i[1] == "QX06"]
+        silent = [] if CZERNY else [i for i in issues if i[1] == "QX06"]
         score = 10 * len(errors) + 2 * len(silent) + sum(1 for i in issues if i[0] == "warning")
         feedback = validator_feedback(issues, meta)
         attempts.append({"round": r, "errors": len(errors), "score": score, "feedback": feedback})
@@ -224,8 +236,10 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
             break
         user = (description + "\n\nThe previous plan was built and checked. Problems found:\n- " +
                 "\n- ".join(feedback) +
-                "\nFix them: avoid parallel fifths between voices, give every instrument a part, "
-                "keep each instrument in its range, answer with JSON only.")
+                ("\nFix them: avoid parallel fifths between voices, keep each instrument in its range, "
+                 "answer with JSON only." if CZERNY else
+                 "\nFix them: avoid parallel fifths between voices, give every instrument a part, "
+                 "keep each instrument in its range, answer with JSON only."))
     if best is None:
         raise RuntimeError("planner produced no valid plan: %s" % attempts[-1])
     log, issues, names = o.run(in_path, out_stem, "off", best["plan_path"])
