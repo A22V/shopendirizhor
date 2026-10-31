@@ -19,6 +19,26 @@ RANGES_UNVERIFIED = {
     "horn": (41, 77),
 }
 
+# Practical ranges taken from Berlioz, Treatise on Instrumentation (ed. Strauss), chapters on each instrument.
+# Only values that the text states are listed; they are checked as a separate warning (G03) and do NOT drive the
+# orchestrator, whose own table above is unchanged. (low, high) in sounding MIDI notes; None = not stated / not checked.
+#  violin       G3-C7, "the three highest notes A, B, C are very difficult ... not advisable in the orchestra" (chapter The Violin)
+#  cello        range "may be three and a half octaves" from C2 (chapter The Violoncello)
+#  double_bass  "in the orchestra two octaves and a fourth" from E1 on four strings (chapter The Double-bass)
+#  flute        three complete octaves C4-C7; lowest C and C# better not used in the orchestra (chapter The Flute)
+#  bassoon      Bb1 up to the last Bb (Bb4); "not advisable to go above the last Bb", higher Eb harms the player's embouchure
+#  Not stated as a fixed range in the text: viola ("at least three octaves"), oboe (staff only), clarinet, horn (depends on the key).
+# Low ends other than the stated starting notes are copied from the unverified table.
+RANGES_BERLIOZ = {
+    "violin": (55, 96), "cello": (36, 78), "double_bass": (28, 57), "flute": (60, 96), "bassoon": (34, 70),
+}
+
+RANGES_OLD = dict(RANGES_UNVERIFIED)   # the phrase planner keeps using this table: it decides who plays the melody
+import os as _os
+if _os.environ.get("ORCH_RANGES") == "berlioz":
+    # optional: the orchestrator itself uses the ranges stated by Berlioz (see RANGES_BERLIOZ); default is the old table
+    RANGES_UNVERIFIED = {**RANGES_UNVERIFIED, **RANGES_BERLIOZ}
+
 def instrument_key(name):
     n = name.lower()
     if "piano" in n: return None
@@ -102,6 +122,14 @@ def check_score(path):
             bad = [p for p in voices[k].values() if p < lo or p > hi]
             if bad:
                 issues.append(("warning", "G01", None, f"{names[k]}: {len(bad)} notes outside approximate range"))
+
+    for k in range(len(parts)):
+        key = instrument_key(names[k])
+        if key in RANGES_BERLIOZ:
+            lo, hi = RANGES_BERLIOZ[key]
+            bad = [p for p in voices[k].values() if p < lo or p > hi]
+            if bad:
+                issues.append(("warning", "G03", None, f"{names[k]}: {len(bad)} notes outside Berlioz's practical range {lo}-{hi}"))
 
     # QX02: dynamics must exist
     if not list(s.recurse().getElementsByClass('Dynamic')):

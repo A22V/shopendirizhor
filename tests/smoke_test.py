@@ -22,5 +22,18 @@ for name, min_phrases in CASES:
         failed += 0 if good else 1
     except Exception:
         print(name, "FAIL (исключение)"); traceback.print_exc(); failed += 1
+# редукция: обычный путь и путь с выбором голосов моделью (раньше второй не проверялся)
+try:
+    import reduction
+    src = os.path.join(ROOT, "input", "k545_piano_excerpt.mid")
+    a = reduction.reduce_to_piano(src, os.path.join(outdir, "red_plain.mid"))
+    text, n = reduction.describe_for_reduction(src)
+    plan, _ = reduction.validate_keep_plan({"blocks": [{"block": 1, "rh_max": 3, "lh_max": 2, "keep": "outer"}]}, n)
+    b = reduction.reduce_with_keep_plan(src, os.path.join(outdir, "red_plan.mid"), plan)
+    ok = a["notes_in"] > 0 and b["notes_in"] > 0
+    print("%-30s %s  нот: %d -> %d / %d" % ("редукция", "OK " if ok else "FAIL", a["notes_in"], a["notes_rh"] + a["notes_lh"], b["notes_rh"] + b["notes_lh"]))
+    failed += 0 if ok else 1
+except Exception:
+    print("редукция FAIL (исключение)"); traceback.print_exc(); failed += 1
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, "/mnt/user-data/outputs")
 import validator
 
-RANGES = validator.RANGES_UNVERIFIED            # UNVERIFIED sounding ranges (MIDI)
+RANGES = validator.RANGES_OLD                   # planner table (unchanged); the orchestrator may place notes by Berlioz ranges
 KEYMAP = {"Flute": "flute", "Oboe": "oboe", "Clarinet": "clarinet", "Bassoon": "bassoon", "Horn": "horn",
           "Violin I": "violin", "Violin II": "violin", "Viola": "viola", "Cello": "cello",
           "Double Bass": "double_bass"}
@@ -30,6 +30,20 @@ COLORS = {
     "clarinet":       [("Clarinet", 0)],
     "violin":         [("Violin I", 0)],
 }
+import os as _os
+COMFORT = _os.environ.get("ORCH_COMFORT") == "1"   # optional, OFF by default; heuristic, not from a book
+FLUTE_DOUBLE_TOP = 80                                # the flute doubles an octave up only while the doubled melody averages below G#5
+COMFORT_TOP = 84                                     # C6: above this the flute doubling goes up an octave only if it stays below it
+
+
+def _flute_up(mean, shift):
+    """Octave by which the flute doubles the melody (12 by default). With ORCH_COMFORT=1 the flute stays in unison
+    when the doubled melody would sit above C6 on average (heuristic: complaint about piercing high notes, 2026-10-31)."""
+    if COMFORT and mean is not None and mean + shift + 12 > FLUTE_DOUBLE_TOP:
+        return 0
+    return 12
+
+
 STRING_LED = {"strings+oboe", "cello+bassoon", "violin+flute", "violin"}
 
 
@@ -108,7 +122,8 @@ def choose_color(kind, pitches, mean, prev):
     for c in cands:
         name, base = COLORS[c][0]
         for s in (0, -12, 12, -24, 24):
-            cost = _oor(pitches, name, base + s) + (4 if s else 0) + (3 if c == prev else 0)
+            shift_cost = (4 * (abs(s) // 12) + (6 if mean + base + s > COMFORT_TOP else 0)) if COMFORT else (4 if s else 0)
+            cost = _oor(pitches, name, base + s) + shift_cost + (3 if c == prev else 0)
             if c == "cello+bassoon" and mean > 66: cost += 100      # low colour only for low melodies
             if c == "violin+flute" and mean < 76: cost += 100       # brilliant colour only for high melodies
             if c == "violin" and kind != "run" and mean < 80: cost += 50
@@ -117,10 +132,10 @@ def choose_color(kind, pitches, mean, prev):
     return best[1], best[2]
 
 
-def scene(kind, color, shift, climax):
+def scene(kind, color, shift, climax, mean=None):
     """Specs are [instrument, octave shift, share of the phrase after which the instrument enters]."""
     enter = 0.0 if climax else 0.5
-    mel = [[n, b + shift] for n, b in COLORS[color]] if color else []
+    mel = [[n, (_flute_up(mean, shift) if (n == "Flute" and b == 12) else b) + shift] for n, b in COLORS[color]] if color else []
     string_led = color in STRING_LED
     if kind == "intro":
         return {"melody": [], "bass": [["Cello", 0, 0.0]], "figuration": [["Viola", 0, 0.0]],
@@ -140,7 +155,7 @@ def scene(kind, color, shift, climax):
         if string_led: out.update(inner1=[["Viola", 0, 0.0]], inner2=[["Horn", 0, enter]])
         else: out.update(inner1=[["Violin II", 0, 0.0]], inner2=[["Viola", 0, enter]])
     if climax and not any(n == "Flute" for n, _ in COLORS[color]) and kind != "run":
-        out["melody"] = out["melody"] + [["Flute", 12 + shift, 0.0]]
+        out["melody"] = out["melody"] + [["Flute", _flute_up(mean, shift) + shift, 0.0]]
     return out
 
 
@@ -192,7 +207,7 @@ def make_plan(s, events, melody, meta):
         else:
             color, shift = choose_color(p["kind"], p["_pit"], p["mel_mean"], prev)
             p["color"], prev = color, color
-            p.update(scene(p["kind"], color, shift, p["climax"]))
+            p.update(scene(p["kind"], color, shift, p["climax"], p["mel_mean"]))
             why.append("melody colour '%s' chosen by register fit, alternating colours (G02, G05, MG04)" % color)
             if shift: why.append("whole phrase moved by %+d semitones so the contour is kept (G01)" % shift)
             if p["kind"] == "figuration": why.append("arpeggio accompaniment passed on as figuration instead of static chords")

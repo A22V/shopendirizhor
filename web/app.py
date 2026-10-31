@@ -25,6 +25,26 @@ LLM_READY = bool(PROVIDER and PROVIDER_KEY and PROVIDER_MODEL)
 
 st.set_page_config(page_title="Шопендирижёр", page_icon="🎼", layout="centered")
 
+GOLD_SCROLL = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 60'>"
+    "<g fill='none' stroke='%23b8860b' stroke-width='2' stroke-linecap='round'>"
+    "<path d='M4 56 C 4 20, 30 6, 52 14 S 58 40, 40 42 S 28 30, 38 24'/>"
+    "<path d='M116 56 C 116 20, 90 6, 68 14 S 62 40, 80 42 S 92 30, 82 24'/>"
+    "<circle cx='60' cy='10' r='3' fill='%23b8860b'/>"
+    "<path d='M30 56 H90' stroke-width='1.2'/>"
+    "</g></svg>"
+)
+DIVIDER = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 24' width='300' height='24'>"
+    "<g fill='none' stroke='%23b8860b' stroke-width='1.5' stroke-linecap='round'>"
+    "<path d='M4 12 H110'/><path d='M190 12 H296'/>"
+    "<path d='M110 12 C 120 2, 132 2, 140 12 C 132 22, 120 22, 110 12'/>"
+    "<path d='M190 12 C 180 2, 168 2, 160 12 C 168 22, 180 22, 190 12'/>"
+    "<circle cx='150' cy='12' r='4' fill='%23b8860b'/>"
+    "</g></svg>"
+)
+
+import urllib.parse as _up
 BAROQUE_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500&family=IM+Fell+English&display=swap');
@@ -41,10 +61,22 @@ h1 { border-bottom: 2px double var(--gold); padding-bottom: .3rem; text-align: c
   font-family: 'Cormorant Garamond', serif; font-size: 1.05rem; letter-spacing: .4px; border-radius: 4px; }
 .stButton > button:hover, .stDownloadButton > button:hover { border-color: var(--gold-soft); color: #fff; }
 .warn { border-left: 4px solid var(--gold); padding: .4rem .8rem; background: rgba(184,134,11,.08); }
+.frame { position: relative; }
+.frame::before, .frame::after {
+  content: ""; position: absolute; width: 60px; height: 30px; pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,__SCROLL_URI__");
+  background-size: contain; background-repeat: no-repeat; opacity: .8;
+}
+.frame::before { top: -6px; left: -6px; }
+.frame::after { bottom: -6px; right: -6px; transform: rotate(180deg); }
+.divider { text-align: center; margin: -.4rem 0 .6rem; }
+
 </style>
 """
+BAROQUE_CSS = BAROQUE_CSS.replace("__SCROLL_URI__", _up.quote(GOLD_SCROLL.replace('%23', '#'), safe="'=:/ "))
 st.markdown(BAROQUE_CSS, unsafe_allow_html=True)
 
+st.markdown("<div class='divider'>" + DIVIDER + "</div>", unsafe_allow_html=True)
 st.markdown("<h1>Шопендирижёр</h1>", unsafe_allow_html=True)
 st.markdown("<p class='motto'>Фортепианная пьеса — оркестровый наряд</p>", unsafe_allow_html=True)
 
