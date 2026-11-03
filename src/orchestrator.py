@@ -519,8 +519,13 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None):
     s, events, melody, meta = analyze(in_path)
     import phrase_planner
     plan = json.load(open(plan_path, encoding="utf-8")) if plan_path else phrase_planner.make_plan(s, events, melody, meta)
+    import texture_fix
+    thin_changes = []
+    if texture_fix.enabled():   # ORCH_THIN=1: thin out "walls of sound" (see texture_fix.py); off by default
+        plan, thin_changes = texture_fix.thin_plan(plan)
     json.dump(plan, open(out_stem + "_plan.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     lines, log = realize(s, events, melody, meta, plan)
+    if thin_changes: log["thin_changes"] = thin_changes
     dyn = {bi: ph["level"] for ph in plan["phrases"] for bi in range(ph["bars"][0] - 1, ph["bars"][1])}
     log["dynamics_by_bar"] = {b + 1: d for b, d in sorted(dyn.items())}
     snd = build_score(s, lines, dyn, piano_mode, meta)
