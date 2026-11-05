@@ -35,5 +35,16 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("редукция FAIL (исключение)"); traceback.print_exc(); failed += 1
+# рецензент партитуры: отчёт строится на результате оркестровки K.545 из этого же теста
+try:
+    import score_review
+    stem = os.path.join(outdir, "k545_piano_excerpt")
+    res = score_review.review(stem + ".mid", stem + ".musicxml")
+    text = score_review.report_text(res, "k545")
+    ok = res["stats"]["тактов"] > 0 and "Рецензия" in text and all(f[2] for f in res["findings"])
+    print("%-30s %s  тактов=%d  замечаний=%d" % ("рецензент партитуры", "OK " if ok else "FAIL", res["stats"]["тактов"], len(res["findings"])))
+    failed += 0 if ok else 1
+except Exception:
+    print("рецензент партитуры FAIL (исключение)"); traceback.print_exc(); failed += 1
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)
