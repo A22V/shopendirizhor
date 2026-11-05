@@ -377,7 +377,7 @@ def realize(s, events, melody, meta, plan):
         pos = (bi - (a_ - 1)) / (b_ - a_ + 1)
         for spec in ph.get(role, []):
             name, shift = spec[0], spec[1]
-            if len(spec) > 2 and pos < spec[2] - 1e-9: continue
+            if len(spec) > 2 and spec[2] is not None and pos < spec[2] - 1e-9: continue
             if len(spec) > 3 and spec[3] is not None and pos >= spec[3] - 1e-9: continue
             fitted = fit(midi + shift, name)
             if fitted is None: log["dropped"] += 1; continue
