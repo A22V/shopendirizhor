@@ -261,6 +261,7 @@ def enforce_breath(lines, meta, log):
 
 
 ENABLE_WIND_BREATHS = False
+BASS_FLOOR = 40   # E2: ниже этой ноты контрабас при ORCH_BASS_UP=1 поднимается на октаву (эвристика)
 def fix_bass_fifths(lines, log):
     """HM32 in the bass: if cello and double bass form a parallel fifth, move the double bass by an octave."""
     cel = sorted(lines.get("Cello", []), key=lambda n: n[0])
@@ -399,6 +400,14 @@ def realize(s, events, melody, meta, plan):
         lines[name] = [n for n in seq if n[1] > 1e-6]
     hold_pads(lines, events, meta, log)
     merge_sustains(lines, meta, log)
+    import os as _os
+    if _os.environ.get("ORCH_BASS_UP", "") not in ("", "0", "false", "False"):
+        # ORCH_BASS_UP=1: "keep the basses up" (Forsyth p.439, смысл подтверждён; порог E2=40 эвристика):
+        # ноты контрабаса ниже E2 поднимаются на октаву. По умолчанию выключено.
+        moved = 0
+        for n in lines.get("Double Bass", []):
+            if n[2] < BASS_FLOOR: n[2] += 12; moved += 1
+        if moved: log["bass_raised"] = moved
     fix_bass_fifths(lines, log)
     enforce_breath(lines, meta, log)
     if ENABLE_WIND_BREATHS:
