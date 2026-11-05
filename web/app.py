@@ -8,18 +8,19 @@ import streamlit as st
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
+try:
+    for _k, _v in st.secrets.items():          # keys from Streamlit "Secrets" become environment variables
+        if isinstance(_v, str):                 # (before the imports below: ORCH_RANGES / ORCH_COMFORT are read at import)
+            os.environ.setdefault(_k, _v)
+except Exception:
+    pass
+
 import orchestrator          # noqa: E402
 import validator             # noqa: E402
 import audio_tools           # noqa: E402
 import llm_planner           # noqa: E402
 import reduction             # noqa: E402
-
-try:
-    for _k, _v in st.secrets.items():          # keys from Streamlit "Secrets" become environment variables
-        if isinstance(_v, str):
-            os.environ.setdefault(_k, _v)
-except Exception:
-    pass
+import score_review          # noqa: E402
 PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
 LLM_READY = bool(PROVIDER and PROVIDER_KEY and PROVIDER_MODEL)
 
@@ -110,8 +111,10 @@ use_llm = False
 if LLM_READY:
     use_llm = st.checkbox("Помощь модели (%s): план оркестровки или выбор голосов при переложении" % PROVIDER, value=True,
                           help="Модель пишет план по смыслу фраз, программа проверяет его.")
-mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", "Переложение для фортепиано (из оркестра)"], horizontal=True)
-go = st.button("Создать оркестровку" if mode == "Оркестровка (из фортепиано)" else "Создать переложение", disabled=up is None, use_container_width=True)
+REVIEW_MODE = "Проверить партитуру (готовый оркестр)"
+mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", "Переложение для фортепиано (из оркестра)", REVIEW_MODE], horizontal=True)
+go = st.button({"Оркестровка (из фортепиано)": "Создать оркестровку", REVIEW_MODE: "Проверить партитуру"}.get(mode, "Создать переложение"),
+               disabled=up is None, use_container_width=True)
 
 
 def process(data: bytes, name: str, use_llm_flag: bool = False):
@@ -136,11 +139,52 @@ def process(data: bytes, name: str, use_llm_flag: bool = False):
         mp3 = out if os.path.exists(out) else None
     except Exception:
         mp3 = None
+    try:
+        review = score_review.review(stem + ".mid", stem + ".musicxml")
+    except Exception:
+        review = None
     return {"work": work, "stem": stem, "plan": plan, "report": report, "issues": issues, "llm_log": llm_log,
-            "mp3": mp3, "name": os.path.splitext(name)[0]}
+            "mp3": mp3, "name": os.path.splitext(name)[0], "review": review}
 
 
-if go and up is not None and mode == "Переложение для фортепиано (из оркестра)":
+def show_review(review, expanded=True):
+    """Russian-language review of the score (src/score_review.py): findings with an honest status of every rule."""
+    if not review:
+        st.info("Рецензия недоступна.")
+        return
+    s = review["stats"]
+    st.caption("Тактов: %d, темп около %d уд/мин. Инструментов в такте: в среднем %s, от %d до %d. "
+               "Модуль считает, а не слушает: звучание оценивает слушатель." % (
+                   s["тактов"], s["темп_уд_мин"], s["инструментов_в_такте_среднее"], *s["инструментов_в_такте_мин_макс"]))
+    if not review["findings"]:
+        st.success("Замечаний нет.")
+    for _, code, status, text in review["findings"]:
+        st.markdown("**[%s]** %s" % (code, text))
+        st.caption("Статус правила: " + status)
+
+
+
+if go and up is not None and mode == REVIEW_MODE:
+    if up.size > 2 * 1024 * 1024:
+        st.error("Файл больше 2 МБ.")
+    else:
+        with st.spinner("Проверяю партитуру..."):
+            try:
+                _work = tempfile.mkdtemp(prefix="review_")
+                _src = os.path.join(_work, "score.mid")
+                with open(_src, "wb") as _f:
+                    _f.write(up.getvalue())
+                _rv = score_review.review(_src)
+                if not _rv["stats"]["тактов"]:
+                    raise ValueError("в файле не найдено ни одной дорожки оркестровых инструментов")
+                st.session_state.result = {"mode": "review", "review": _rv, "name": os.path.splitext(up.name)[0]}
+            except Exception:
+                st.session_state.result = None
+                st.error("Не удалось проверить файл. Нужен MIDI оркестровки, где дорожки названы по инструментам "
+                         "(Flute, Oboe, Clarinet, Bassoon, Horn, Violin, Viola, Cello, Double Bass).")
+                with st.expander("Подробности для разработчика"):
+                    st.code(traceback.format_exc())
+elif go and up is not None and mode == "Переложение для фортепиано (из оркестра)":
     if up.size > 2 * 1024 * 1024:
         st.error("Файл больше 2 МБ.")
     else:
@@ -182,6 +226,11 @@ elif go and up is not None:
                     st.code(traceback.format_exc())
 
 res = st.session_state.result
+if res and res.get("mode") == "review":
+    st.markdown("### 3. Рецензия на партитуру")
+    st.caption("Программа ничего не исправляет: она показывает, что нашла, и честно называет, чем подтверждено каждое правило.")
+    show_review(res["review"])
+    res = None
 if res and res.get("mode") == "reduction":
     st.markdown("### 3. Результат переложения")
     s = res["stats"]
@@ -221,7 +270,10 @@ if res:
                      "Кульминация": "да" if ph["climax"] else ""})
     st.table(rows)
 
-    with st.expander("Замечания проверки"):
+    with st.expander("Рецензия на партитуру (по-русски)", expanded=True):
+        show_review(res.get("review"))
+
+    with st.expander("Технические замечания проверки (английские коды)"):
         if not issues:
             st.write("Замечаний нет.")
         for sev, rid, _, msg in issues:
