@@ -161,6 +161,12 @@ def show_review(review, expanded=True):
     for _, code, status, text in review["findings"]:
         st.markdown("**[%s]** %s" % (code, text))
         st.caption("Статус правила: " + status)
+    if review.get("grid") and review["findings"]:
+        st.markdown("**Карта замечаний.** Строки: инструменты, столбцы: такты. Красное: место замечания.")
+        opts = ["Все замечания сразу"] + ["%d. [%s] %s" % (i + 1, f[1], f[3][:70]) for i, f in enumerate(review["findings"])]
+        pick = st.selectbox("Показать на карте", opts, index=1 if len(opts) > 1 else 0, key="map_pick")
+        only = None if pick == opts[0] else opts.index(pick) - 1
+        st.markdown(score_review.map_html(review, only=only), unsafe_allow_html=True)
 
 
 
@@ -230,6 +236,9 @@ if res and res.get("mode") == "review":
     st.markdown("### 3. Рецензия на партитуру")
     st.caption("Программа ничего не исправляет: она показывает, что нашла, и честно называет, чем подтверждено каждое правило.")
     show_review(res["review"])
+    st.download_button("Скачать карту замечаний (HTML, открывается в браузере)",
+                       score_review.map_html(res["review"], standalone=True).encode("utf-8"),
+                       file_name=res["name"] + "_карта_замечаний.html", mime="text/html", use_container_width=True)
     res = None
 if res and res.get("mode") == "reduction":
     st.markdown("### 3. Результат переложения")
@@ -286,6 +295,11 @@ if res:
             p = res["stem"] + ext
             if os.path.exists(p):
                 z.write(p, res["name"] + os.path.basename(p)[len("result"):] if ext.startswith("_") else res["name"] + ext)
+        if res.get("review"):
+            try:
+                z.writestr(res["name"] + "_карта_замечаний.html", score_review.map_html(res["review"], standalone=True))
+            except Exception:
+                pass
     st.download_button("Скачать всё (ZIP)", buf.getvalue(), file_name=res["name"] + "_оркестровка.zip",
                        mime="application/zip", use_container_width=True)
     if res["mp3"]:

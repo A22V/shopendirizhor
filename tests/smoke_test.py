@@ -41,7 +41,9 @@ try:
     stem = os.path.join(outdir, "k545_piano_excerpt")
     res = score_review.review(stem + ".mid", stem + ".musicxml")
     text = score_review.report_text(res, "k545")
-    ok = res["stats"]["тактов"] > 0 and "Рецензия" in text and all(f[2] for f in res["findings"])
+    page = score_review.map_html(res, standalone=True)
+    ok = (res["stats"]["тактов"] > 0 and "Рецензия" in text and all(f[2] for f in res["findings"])
+          and len(res["marks"]) == len(res["findings"]) and "<table" in page and page.count("class='mv'") == len(res["findings"]) + 1)
     print("%-30s %s  тактов=%d  замечаний=%d" % ("рецензент партитуры", "OK " if ok else "FAIL", res["stats"]["тактов"], len(res["findings"])))
     failed += 0 if ok else 1
 except Exception:
