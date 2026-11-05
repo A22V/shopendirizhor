@@ -401,6 +401,12 @@ def realize(s, events, melody, meta, plan):
     hold_pads(lines, events, meta, log)
     merge_sustains(lines, meta, log)
     import os as _os
+    import score_fix
+    if score_fix.enabled():
+        # ORCH_FIX_FAST=1: быстрые ноты валторны, фагота, контрабаса -> опорные по долям (score_fix.py; Черни с. 22, 28). Выкл. по умолчанию.
+        _bpb = (starts[1] - starts[0]) if len(starts) > 1 else 4.0
+        _fx = score_fix.fix_lines(lines, _bpb)
+        if _fx: log["fast_fixed"] = _fx
     if _os.environ.get("ORCH_BASS_UP", "") not in ("", "0", "false", "False"):
         # ORCH_BASS_UP=1: "keep the basses up" (Forsyth p.439, смысл подтверждён; порог E2=40 эвристика):
         # ноты контрабаса ниже E2 поднимаются на октаву. По умолчанию выключено.

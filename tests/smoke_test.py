@@ -48,6 +48,20 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("рецензент партитуры FAIL (исключение)"); traceback.print_exc(); failed += 1
+# автоисправление быстрых нот (score_fix): готовый MIDI исправляется, после исправления K2 нет
+try:
+    import score_fix
+    fixed = os.path.join(outdir, "k545_fixed.mid")
+    ch = score_fix.fix_midi(stem + ".mid", fixed)
+    r2 = score_review.review(fixed)
+    unit, _ = score_fix.simplify_fast([[0, 0.25, 40], [0.25, 0.25, 43], [0.5, 0.5, 45], [1, 1, 40], [2, 0.25, 38], [2.25, 0.25, 41]])
+    ok = unit == [[0, 0.5, 40], [0.5, 0.5, 45], [1, 1, 40], [2, 1.0, 38]]
+    if not ok: print("   simplify_fast:", unit)
+    ok = ok and os.path.exists(fixed) and not any(f[1] == "K2" for f in r2["findings"]) and r2["stats"]["тактов"] == res["stats"]["тактов"]
+    print("%-30s %s  изменений=%d" % ("автоисправление F2", "OK " if ok else "FAIL", len(ch)))
+    failed += 0 if ok else 1
+except Exception:
+    print("автоисправление F2 FAIL (исключение)"); traceback.print_exc(); failed += 1
 # ноты с пометками (нужен verovio; без него проверка пропускается)
 try:
     import score_notation
