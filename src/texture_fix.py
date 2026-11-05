@@ -61,3 +61,31 @@ def thin_plan(plan):
                         "figuration_kept": _names(keep), "removed_from_figuration": removed,
                         "double_bass_moved_to_bass": moved_db})
     return new, changes
+
+
+# ---------------------------------------------------------------------------
+# Контрабас, забытый моделью (ORCH_BASS=1, по умолчанию выключено).
+# Статус: эвристика, проверена на слух (ноктюрн ля минор, 2026-11-05: вариант с
+# контрабасом пользователь оценил как «мелодия звучит побогаче»). В книгах не найдено.
+# Правило: если в плане контрабас не назначен НИ В ОДНОЙ фразе, он добавляется к басовой линии
+# каждой фразы (тот же звуковысотный уровень, диапазон подгоняет orchestrator).
+# Если контрабас в плане есть хотя бы раз, ничего не меняется.
+# ---------------------------------------------------------------------------
+def bass_enabled():
+    return os.environ.get("ORCH_BASS", "") not in ("", "0", "false", "False")
+
+
+def fill_bass(plan):
+    plan = copy.deepcopy(plan)
+    phrases = plan.get("phrases", [])
+    for ph in phrases:
+        for role in ("melody", "inner1", "inner2", "bass", "figuration"):
+            if "Double Bass" in _names(ph.get(role, [])):
+                return plan, []
+    changes = []
+    for ph in phrases:
+        b = ph.get("bass")
+        if b:
+            b.append(["Double Bass", 0, None, None])
+            changes.append("такты %d–%d: контрабас добавлен к басу" % tuple(ph["bars"]))
+    return plan, changes

@@ -547,6 +547,9 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None):
     thin_changes = []
     if texture_fix.enabled():   # ORCH_THIN=1: thin out "walls of sound" (see texture_fix.py); off by default
         plan, thin_changes = texture_fix.thin_plan(plan)
+    if texture_fix.bass_enabled():   # ORCH_BASS=1: add a double bass the planner forgot (see texture_fix.py)
+        plan, _bc = texture_fix.fill_bass(plan)
+        thin_changes = list(thin_changes) + _bc
     json.dump(plan, open(out_stem + "_plan.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     lines, log = realize(s, events, melody, meta, plan)
     if thin_changes: log["thin_changes"] = thin_changes
