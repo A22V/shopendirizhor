@@ -44,6 +44,21 @@ def _flute_up(mean, shift):
     return 12
 
 
+# ORCH_FAST_HOLD=1 (OFF by default): in a FAST phrase the melody is not handed from one timbre to another halfway through.
+# "Fast" = melody notes per second of the phrase >= FAST_NPS. 4.0 is an author heuristic, not from a book:
+# it falls between the K.545 excerpt (4.7 and 7.6 notes/s) and the nocturne (1.2-2.4 notes/s).
+FAST_HOLD = _os.environ.get("ORCH_FAST_HOLD") == "1"
+FAST_NPS = 4.0
+# ORCH_FAST_VIOLIN=1 (OFF by default): in a fast phrase the melody is led by Violin I only (Czerny, School of Practical
+# Composition vol. 3, p. 22: fast and brilliant passages go to the strings; confirmed). Clarinet, oboe, bassoon and horn get
+# no fast melody but hold harmony (long notes) so they do not fall silent (QX06).
+# ORCH_FAST_FLUTE=1 (needs ORCH_FAST_VIOLIN=1): the flute doubles that melody an octave up as colour (Berlioz calls the flute the
+# most agile wind; the two books differ, so this is a separate switch). It rests one bar in every FLUTE_RUN_BEATS beats (breath).
+FAST_VIOLIN = _os.environ.get("ORCH_FAST_VIOLIN") == "1"
+FAST_FLUTE = FAST_VIOLIN and _os.environ.get("ORCH_FAST_FLUTE") == "1"
+FLUTE_RUN_BEATS = 12.0                               # heuristic: stays under validator.MAX_WIND_RUN_BEATS (16)
+
+
 STRING_LED = {"strings+oboe", "cello+bassoon", "violin+flute", "violin"}
 
 
@@ -191,7 +206,8 @@ def make_plan(s, events, melody, meta):
         elif dens >= THRESHOLDS["run_notes_per_beat"]: kind = "run"
         elif fig >= THRESHOLDS["figuration_notes_per_beat"]: kind = "figuration"
         else: kind = "lyric"
-        phrases.append({"id": k, "bars": [a, b], "kind": kind, "climax": False,
+        secs = sum(f["len"] * 60.0 / tempo_at(meta, f["start"]) for f in fs)
+        phrases.append({"id": k, "bars": [a, b], "kind": kind, "climax": False, "_nps": len(pit) / secs if secs else 0.0,
                         "mel_mean": (sum(pit) / len(pit)) if pit else None,
                         "mel_density": round(dens, 2), "fig_density": round(fig, 2), "_pit": pit})
     singing = [p for p in phrases if p["kind"] in ("lyric", "figuration") and p["mel_mean"] is not None
@@ -216,10 +232,45 @@ def make_plan(s, events, melody, meta):
             if color in STRING_LED: why.append("melody in strings -> harmony in clarinet/horn (OR03)")
             else: why.append("melody in winds -> harmony in strings (OR03)")
         p["why"] = why
+    # fast phrases led by Violin I (ORCH_FAST_VIOLIN): winds keep to long harmony notes, no fast melody
+    if FAST_VIOLIN:
+        flute_run = 0.0
+        for p in phrases:
+            if p["kind"] == "intro" or not p.get("melody") or p["_nps"] < FAST_NPS:
+                flute_run = 0.0; continue
+            a, b = p["bars"]
+            def add(role, name, shift, enter=0.0, leave=None):
+                specs = [list(s) for s in p.get(role, []) if s[0] != name]
+                specs.append([name, shift, enter] if leave is None else [name, shift, enter, leave])
+                p[role] = specs
+            p["melody"] = [["Violin I", 0, 0.0]]
+            # long harmony notes (roles pad1/pad2 = inner1/inner2 pitches held, see orchestrator.hold_pads); shifts keep the
+            # winds below the melody and avoid unison with the strings (heuristic)
+            p["pad1"] = [["Clarinet", -12, 0.0], ["Oboe", 0, 0.0]]
+            p["pad2"] = [["Horn", -12, 0.0], ["Bassoon", -12, 0.0]]
+            p["_fast"] = True
+            why = ["fast phrase (%.1f notes/s): melody to Violin I (Czerny p.22); clarinet, oboe, horn and bassoon "
+                   "hold long harmony notes (heuristic threshold)" % p["_nps"]]
+            if FAST_FLUTE:                                   # flute colour, an octave up, resting one bar per FLUTE_RUN_BEATS
+                spans, cur = [], None
+                for bi in range(a, b + 1):
+                    ln = feats[bi - 1]["len"]
+                    if flute_run + ln > FLUTE_RUN_BEATS + 1e-9:
+                        flute_run = 0.0; cur = None          # this bar is a rest for the flute
+                        continue
+                    flute_run += ln
+                    if cur is None: cur = [bi, bi]; spans.append(cur)
+                    else: cur[1] = bi
+                n = b - a + 1
+                up = _flute_up(p["mel_mean"], 0)
+                p["melody"] += [["Flute", up, (s0 - a) / n, ((s1 - a + 1) / n if s1 < b else None)] for s0, s1 in spans]
+                why.append("flute doubles the melody %+d semitones as colour, resting a bar after every %d beats (breath)"
+                           % (up, FLUTE_RUN_BEATS))
+            p["why"] = p.get("why", []) + why
     # breath fix (QX04): a wind melody in a long phrase hands over to strings halfway through
     WIND_MEL = {"Flute", "Oboe", "Clarinet", "Bassoon"}
     for p in phrases:
-        if p["kind"] == "intro" or not p.get("melody"): continue
+        if p["kind"] == "intro" or not p.get("melody") or p.get("_fast"): continue
         a, b = p["bars"]
         if (b - a + 1) < 4: continue
         if not any(spec[0] in WIND_MEL for spec in p["melody"]): continue
@@ -227,12 +278,20 @@ def make_plan(s, events, melody, meta):
         strings = [spec for spec in p["melody"] if spec[0] not in WIND_MEL]
         if not strings:
             strings = [["Violin I", 0, 0.0]]
+        if FAST_HOLD and p["_nps"] >= FAST_NPS:
+            # fast phrase: no handover halfway; the strings carry the whole phrase (no breath needed), a wind only doubles
+            # while the phrase fits into one breath (MAX_WIND_RUN_BEATS)
+            beats = sum(f["len"] for f in feats[a - 1:b])
+            keep = [[s[0], s[1], 0.0] for s in p["melody"] if s[0] in WIND_MEL] if beats <= validator.MAX_WIND_RUN_BEATS else []
+            p["melody"] = [[s[0], s[1], 0.0] for s in strings] + keep
+            p["why"] = p.get("why", []) + ["fast phrase (%.1f notes/s): melody keeps one carrier, no handover halfway (heuristic)" % p["_nps"]]
+            continue
         second_half = [[s[0], s[1], 0.5] for s in strings]
         p["melody"] = winds + second_half
         p["why"] = p.get("why", []) + ["wind melody hands over to strings halfway (breath, QX04)"]
     # bassoon bass (QX04): in longer phrases the bassoon stops halfway and the cello takes over
     for p in phrases:
-        if p["kind"] == "intro" or not p.get("bass"): continue
+        if p["kind"] == "intro" or not p.get("bass") or p.get("_fast"): continue
         a, b = p["bars"]
         if (b - a + 1) < 4: continue
         if not any(spec[0] == "Bassoon" for spec in p["bass"]): continue
@@ -251,7 +310,7 @@ def make_plan(s, events, melody, meta):
     levels = phrase_levels(phrases)
     for p, lv in zip(phrases, levels):
         p["level"] = lv
-        p.pop("_pit", None)
+        p.pop("_pit", None); p.pop("_nps", None); p.pop("_fast", None)
     return {"piece": {"bars": len(feats), "time_signatures": meta["tsigs"], "tempo_changes": len(meta["tempos"]),
                       "thresholds": THRESHOLDS},
             "phrases": phrases}

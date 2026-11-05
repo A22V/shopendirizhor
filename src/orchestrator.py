@@ -332,6 +332,27 @@ def enforce_wind_breaths(lines, log):
                     run = 0.0
             i += 1
 
+def hold_pads(lines, events, meta, log):
+    """Roles pad1/pad2 (only planned in fast phrases with ORCH_FAST_VIOLIN=1): a wind holds one harmony tone instead of
+    repeating it every beat. A held note is extended through the following beats of the SAME bar while its pitch class is still
+    a tone of the piano chord sounding there; otherwise a new note starts. Pitches are never changed."""
+    starts = [b[0] for b in meta["bars"]]
+    ev_on = [e["offset"] for e in events]
+    for name, seq in lines.items():
+        if not any(n[3].startswith("pad") for n in seq): continue
+        out = []
+        for n in seq:
+            if out and n[3].startswith("pad") and out[-1][3] == n[3]:
+                cur = out[-1]
+                i = bisect.bisect_right(ev_on, n[0] + 1e-6) - 1
+                pcs = {m % 12 for m in events[i]["pitches"]} if i >= 0 else set()
+                if abs(cur[0] + cur[1] - n[0]) < 1e-6 and bar_of(starts, cur[0]) == bar_of(starts, n[0]) and cur[2] % 12 in pcs \
+                        and (events[i]["melody"] is None or cur[2] < events[i]["melody"]):   # never held above the melody
+                    cur[1] += n[1]; log["pad_holds"] = log.get("pad_holds", 0) + 1
+                    continue
+            out.append(n)
+        lines[name] = out
+
 def realize(s, events, melody, meta, plan):
     starts = [b[0] for b in meta["bars"]]
     log = {"octave_shifts": 0, "dropped": 0, "plans": {}, "fifths_fixed": 0, "fifths_unresolved": [],
@@ -365,7 +386,9 @@ def realize(s, events, melody, meta, plan):
     for m in melody: put(m["offset"], m["dur"], m["pitch"], "melody")
     for e, v in zip(events, voices):
         for role in ("bass", "inner1", "inner2"):
-            if role in v: put(e["offset"], e["dur"], v[role], role)
+            if role in v:
+                put(e["offset"], e["dur"], v[role], role)
+                if role != "bass": put(e["offset"], e["dur"], v[role], "pad" + role[-1])   # pads: see hold_pads
     for f in meta["fig"]: put(f["offset"], f["dur"], f["pitch"], "figuration")
     for name in lines: lines[name].sort(key=lambda n: n[0])
     for name, seq in lines.items():                  # a single instrument can't sound two notes at once
@@ -374,6 +397,7 @@ def realize(s, events, melody, meta, plan):
             if seq[i][1] > gap:
                 seq[i][1] = max(gap, 0.0)
         lines[name] = [n for n in seq if n[1] > 1e-6]
+    hold_pads(lines, events, meta, log)
     merge_sustains(lines, meta, log)
     fix_bass_fifths(lines, log)
     enforce_breath(lines, meta, log)
