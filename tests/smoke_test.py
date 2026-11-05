@@ -48,5 +48,18 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("рецензент партитуры FAIL (исключение)"); traceback.print_exc(); failed += 1
+# ноты с пометками (нужен verovio; без него проверка пропускается)
+try:
+    import score_notation
+    if score_notation.available():
+        prep = score_notation.prepare(stem + ".musicxml", stem + ".mid")
+        marked = score_notation.ids_for(res, prep)
+        ok = len(prep["pages"]) > 0 and all(i in prep["page_of"] for i in marked) and "<svg" in score_notation.standalone_html(res, prep)
+        print("%-30s %s  страниц=%d  красных нот=%d" % ("ноты с пометками", "OK " if ok else "FAIL", len(prep["pages"]), len(marked)))
+        failed += 0 if ok else 1
+    else:
+        print("%-30s пропущено (verovio не установлен)" % "ноты с пометками")
+except Exception:
+    print("ноты с пометками FAIL (исключение)"); traceback.print_exc(); failed += 1
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

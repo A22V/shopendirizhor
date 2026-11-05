@@ -21,6 +21,7 @@ import audio_tools           # noqa: E402
 import llm_planner           # noqa: E402
 import reduction             # noqa: E402
 import score_review          # noqa: E402
+import score_notation        # noqa: E402
 PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
 LLM_READY = bool(PROVIDER and PROVIDER_KEY and PROVIDER_MODEL)
 
@@ -143,6 +144,11 @@ def process(data: bytes, name: str, use_llm_flag: bool = False):
         review = score_review.review(stem + ".mid", stem + ".musicxml")
     except Exception:
         review = None
+    try:   # ноты с пометками (verovio); без него просто не показываем
+        if review and score_notation.available():
+            review["notation"] = score_notation.prepare(stem + ".musicxml", stem + ".mid")
+    except Exception:
+        pass
     return {"work": work, "stem": stem, "plan": plan, "report": report, "issues": issues, "llm_log": llm_log,
             "mp3": mp3, "name": os.path.splitext(name)[0], "review": review}
 
@@ -167,6 +173,19 @@ def show_review(review, expanded=True):
         pick = st.selectbox("Показать на карте", opts, index=1 if len(opts) > 1 else 0, key="map_pick")
         only = None if pick == opts[0] else opts.index(pick) - 1
         st.markdown(score_review.map_html(review, only=only), unsafe_allow_html=True)
+        prep = review.get("notation")
+        if prep:
+            import base64
+            pages, total = score_notation.colored_pages(prep, score_notation.ids_for(review, prep, only), max_pages=4)
+            st.markdown("**Ноты с пометками.** Красные ноты: место выбранного замечания. Показаны страницы %s%s." % (
+                ", ".join(str(p) for p, _ in pages), "" if total <= len(pages) else " (первые %d из %d; все страницы в файле ниже)" % (len(pages), total)))
+            for p, svg in pages:
+                st.markdown("<div style='background:#fff;border:1px solid #d8ccb4;border-radius:6px;padding:6px;margin-bottom:8px'>"
+                            "<img style='width:100%%' src='data:image/svg+xml;base64,%s'/></div>" % base64.b64encode(svg.encode("utf-8")).decode(),
+                            unsafe_allow_html=True)
+            st.download_button("Скачать партитуру с пометками (HTML, открывается в браузере)",
+                               score_notation.standalone_html(review, prep).encode("utf-8"),
+                               file_name="партитура_с_пометками.html", mime="text/html", use_container_width=True, key="dl_notes")
 
 
 
@@ -183,6 +202,11 @@ if go and up is not None and mode == REVIEW_MODE:
                 _rv = score_review.review(_src)
                 if not _rv["stats"]["тактов"]:
                     raise ValueError("в файле не найдено ни одной дорожки оркестровых инструментов")
+                try:
+                    if score_notation.available():
+                        _rv["notation"] = score_notation.prepare(midi_path=_src)
+                except Exception:
+                    pass
                 st.session_state.result = {"mode": "review", "review": _rv, "name": os.path.splitext(up.name)[0]}
             except Exception:
                 st.session_state.result = None
@@ -298,6 +322,9 @@ if res:
         if res.get("review"):
             try:
                 z.writestr(res["name"] + "_карта_замечаний.html", score_review.map_html(res["review"], standalone=True))
+                if res["review"].get("notation"):
+                    z.writestr(res["name"] + "_партитура_с_пометками.html",
+                               score_notation.standalone_html(res["review"], res["review"]["notation"]))
             except Exception:
                 pass
     st.download_button("Скачать всё (ZIP)", buf.getvalue(), file_name=res["name"] + "_оркестровка.zip",
