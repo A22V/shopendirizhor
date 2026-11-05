@@ -105,7 +105,12 @@ if "result" not in st.session_state:
     st.session_state.result = None
 
 st.markdown("### 1. Загрузите пьесу")
-up = st.file_uploader("MIDI-файл (.mid, .midi)", type=["mid", "midi"], accept_multiple_files=False)
+# Без фильтра type: на планшетах (iPad, Android) браузер с фильтром ".mid" часто делает MIDI-файлы серыми
+# и их нельзя выбрать. Расширение проверяем сами.
+up = st.file_uploader("MIDI-файл (.mid, .midi)", accept_multiple_files=False)
+if up is not None and not up.name.lower().endswith((".mid", ".midi")):
+    st.error("Это не MIDI-файл: «%s». Нужен файл с окончанием .mid или .midi." % up.name)
+    up = None
 
 st.markdown("### 2. Что сделать")
 use_llm = False
