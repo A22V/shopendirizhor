@@ -62,6 +62,23 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("автоисправление F2 FAIL (исключение)"); traceback.print_exc(); failed += 1
+# забытые духовые (texture_fix.fill_winds, ORCH_WINDS): добавляются только отсутствующие, только в громкие фразы,
+# новых нот не придумывается; план, где все духовые есть, не меняется
+try:
+    import texture_fix
+    ph = lambda bars, lvl, **r: dict({"bars": bars, "level": lvl, "climax": False, "melody": [["Violin I", 0]],
+                                      "inner1": [["Violin II", 0]], "inner2": [["Viola", 0]], "bass": [["Cello", 0]], "figuration": []}, **r)
+    p = {"phrases": [ph([1, 4], "mp"), ph([5, 8], "f", melody=[["Flute", 0]], inner1=[["Oboe", 0]])]}
+    newp, ch = texture_fix.fill_winds(p)
+    quiet, loud = newp["phrases"]
+    ok = (quiet == p["phrases"][0] and ["Horn", 0, None, None] in loud["inner2"] and ["Bassoon", 0, None, None] in loud["bass"]
+          and ["Clarinet", 0, None, None] not in loud["inner1"] and len(ch) == 2)   # кларнет — пятый духовой: предел 4
+    full = {"phrases": [ph([1, 4], "f", inner1=[["Oboe", 0], ["Clarinet", 0]], inner2=[["Horn", 0]], bass=[["Bassoon", 0]], melody=[["Flute", 0]])]}
+    ok = ok and texture_fix.fill_winds(full) == (full, [])
+    print("%-30s %s  изменений=%d" % ("забытые духовые", "OK " if ok else "FAIL", len(ch)))
+    failed += 0 if ok else 1
+except Exception:
+    print("забытые духовые FAIL (исключение)"); traceback.print_exc(); failed += 1
 # ноты с пометками (нужен verovio; без него проверка пропускается)
 try:
     import score_notation

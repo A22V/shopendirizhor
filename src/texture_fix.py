@@ -89,3 +89,60 @@ def fill_bass(plan):
             b.append(["Double Bass", 0, None, None])
             changes.append("такты %d–%d: контрабас добавлен к басу" % tuple(ph["bars"]))
     return plan, changes
+
+
+# ---------------------------------------------------------------------------
+# Духовые, забытые моделью (ORCH_WINDS=1, по умолчанию выключено). Добавлено 2026-11-06.
+# Случай: DeepSeek Flash на прелюдии ми минор не назначил кларнет, фагот и валторну ни в одной фразе
+# (QX06 ×3), хотя сам написал «fuller, with horn support».
+# Правило (всё эвристика, в книгах не найдено; проверяется на слух парой A/B):
+#   * трогаем только инструмент, которого в плане нет НИ В ОДНОЙ фразе; если он есть хоть раз, план не меняется;
+#   * добавляем его только во фразы с уровнем mf/f/ff или кульминацией (тихие фразы остаются прозрачными);
+#     если таких нет, в самую длинную фразу;
+#   * новых нот не придумываем: инструмент удваивает уже существующую линию (унисон, диапазон подгоняет оркестратор):
+#     фагот — бас (вместе с виолончелью), валторна — второй внутренний голос (держит гармонию; смысл
+#     «валторна держит длинные ноты» — Черни, Op. 600, т. 3, с. 28), кларнет — первый внутренний голос,
+#     флейта и гобой — первый внутренний голос;
+#   * во фразе, где уже 8 и больше инструментов (порог «стены», как в ORCH_THIN) или уже 4 духовых
+#     (порог рецензента K3), ничего не добавляем.
+# ---------------------------------------------------------------------------
+WINDS = ("Flute", "Oboe", "Clarinet", "Bassoon", "Horn")
+FILL_ORDER = ("Horn", "Bassoon", "Clarinet", "Oboe", "Flute")   # кто первым получает место (эвристика: валторна и фагот держат гармонию и бас)
+WIND_ROLE = {"Bassoon": ("bass",), "Horn": ("inner2", "inner1"), "Clarinet": ("inner1", "inner2"),
+             "Flute": ("inner1", "inner2"), "Oboe": ("inner1", "inner2")}
+WIND_RU = {"Flute": "флейта", "Oboe": "гобой", "Clarinet": "кларнет", "Bassoon": "фагот", "Horn": "валторна"}
+WINDS_MAX = 4          # эвристика (как K3 рецензента)
+LOUD = ("mf", "f", "ff")
+
+
+def winds_enabled():
+    return os.environ.get("ORCH_WINDS", "") not in ("", "0", "false", "False")
+
+
+def _used(ph):
+    return {s[0] for r in CORE + ("figuration",) for s in ph.get(r, [])}
+
+
+def fill_winds(plan):
+    """Возвращает (новый_план, список_изменений по-русски). Исходный план не меняется."""
+    plan = copy.deepcopy(plan)
+    phrases = plan.get("phrases", [])
+    named = set().union(*[_used(ph) for ph in phrases]) if phrases else set()
+    missing = [w for w in FILL_ORDER if w not in named]
+    if not missing:
+        return plan, []
+    targets = [ph for ph in phrases if ph.get("climax") or ph.get("level") in LOUD]
+    if not targets and phrases:
+        targets = [max(phrases, key=lambda p: p["bars"][1] - p["bars"][0])]
+    changes = []
+    for w in missing:
+        for ph in targets:
+            used = _used(ph)
+            if len(used) >= THIN_MIN or sum(1 for n in used if n in WINDS) >= WINDS_MAX:
+                continue
+            role = next((r for r in WIND_ROLE[w] if ph.get(r)), None)
+            if role is None:
+                continue                     # нечего удваивать: новых нот не придумываем
+            ph[role] = list(ph[role]) + [[w, 0, None, None]]
+            changes.append("такты %d–%d: %s добавлен(а) к голосу %s" % (ph["bars"][0], ph["bars"][1], WIND_RU[w], role))
+    return plan, changes
