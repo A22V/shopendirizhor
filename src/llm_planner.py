@@ -61,6 +61,9 @@ def extract_text(provider, data):
     raise ValueError(provider)
 
 
+MODELS_SERVED = []   # какое имя модели вернул сам сервис в ответе (проверка, что работает именно выбранная модель)
+
+
 def call_model(provider, model, api_key, system, user, timeout=120):
     url, headers, body = build_request(provider, model, api_key, system, user)
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
@@ -69,6 +72,10 @@ def call_model(provider, model, api_key, system, user, timeout=120):
             data = json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         raise RuntimeError("%s returned HTTP %s: %s" % (provider, e.code, e.read()[:300]))
+    try:
+        MODELS_SERVED.append(str(data.get("model") or data.get("modelVersion") or "?"))
+    except Exception:
+        pass
     return extract_text(provider, data)
 
 

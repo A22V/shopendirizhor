@@ -8,8 +8,8 @@ Step 2  plan  : one orchestration scene per phrase (melody colour, accompaniment
                 back to the orchestrator.
 All thresholds are author heuristics (not from the source book) and are listed in THRESHOLDS.
 """
-import sys
-sys.path.insert(0, "/mnt/user-data/outputs")
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # модули рядом (раньше здесь был путь старой среды)
 import validator
 
 RANGES = validator.RANGES_OLD                   # planner table (unchanged); the orchestrator may place notes by Berlioz ranges

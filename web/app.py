@@ -131,14 +131,25 @@ def process(data: bytes, name: str, use_llm_flag: bool = False):
         f.write(data)
     stem = os.path.join(work, "result")
     llm_log = None
+    planner_info = None
     if use_llm_flag:
+        llm_planner.MODELS_SERVED.clear()
         log, issues, names, llm_log, _pp = llm_planner.orchestrate_with_llm(
             src, stem, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY)
         plan = json.load(open(_pp, encoding="utf-8"))
+        planner_info = {"provider": PROVIDER, "model_requested": PROVIDER_MODEL,
+                        "model_served_by_api": sorted(set(llm_planner.MODELS_SERVED)),
+                        "requests": len(llm_planner.MODELS_SERVED)}
     else:
         log, issues, names = orchestrator.run(src, stem, "off", None)
         plan = json.load(open(stem + "_plan.json", encoding="utf-8"))
     report = json.load(open(stem + "_report.json", encoding="utf-8"))
+    if planner_info:                                  # в отчёт: какая модель писала план (видно и в ZIP)
+        report["planner"] = planner_info
+        try:
+            json.dump(report, open(stem + "_report.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        except Exception:
+            report.pop("planner", None)
     mp3 = None
     try:
         out = audio_tools.render_mp3(stem + ".mid", stem + ".mp3")
@@ -290,7 +301,10 @@ if res:
         st.info("Звуковая запись сейчас недоступна на сервере. Скачайте MIDI и откройте его в программе для музыки.")
 
     if res.get("llm_log"):
-        st.info("План написала модель %s. Проверок плана: %d." % (PROVIDER, len(res["llm_log"])))
+        _pi = (res.get("report") or {}).get("planner") or {}
+        st.info("План написала модель %s. Проверок плана: %d. Заказано: %s; сервис ответил: %s." % (
+            PROVIDER, len(res["llm_log"]), _pi.get("model_requested") or "(не задано)",
+            ", ".join(_pi.get("model_served_by_api") or []) or "—"))
     issues = res["issues"]
     errors = [i for i in issues if i[0] == "error"]
     warns = [i for i in issues if i[0] == "warning"]

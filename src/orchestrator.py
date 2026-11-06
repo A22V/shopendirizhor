@@ -7,7 +7,7 @@ loudness balancing measured on isolated renders, transposed MusicXML, MIDI at so
 """
 import sys, json, copy, warnings, bisect, os, subprocess, tempfile
 warnings.filterwarnings("ignore")
-sys.path.insert(0, "/mnt/user-data/outputs")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # модули рядом (раньше здесь был путь старой среды, он подменял src/ старыми копиями)
 from music21 import converter, stream, note, chord, instrument, meter, dynamics, tempo, volume
 import validator
 
