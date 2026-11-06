@@ -53,6 +53,25 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("проверка переложения FAIL (исключение)"); traceback.print_exc(); failed += 1
+# ноты с пометками для переложения рояля (score_notation.build_hands): две руки, красные ноты совпадают с картой
+try:
+    import score_notation
+    if score_notation.available():
+        pr2 = piano_review.review(os.path.join(outdir, "red_plain.mid"), src)
+        score_notation.build_hands(pr2)
+        prep2 = pr2.get("notation")
+        if prep2 is None:
+            print("ноты переложения FAIL:", pr2.get("notation_error", "")[-500:]); failed += 1
+        else:
+            names = {k[0] for k in prep2["cells"]}
+            marked = score_notation.ids_for(pr2, prep2)
+            ok = len(prep2["pages"]) > 0 and names >= {"Правая рука", "Левая рука"} and all(i in prep2["page_of"] for i in marked)
+            print("%-30s %s  страниц=%d  красных нот=%d" % ("ноты переложения", "OK " if ok else "FAIL", len(prep2["pages"]), len(marked)))
+            failed += 0 if ok else 1
+    else:
+        print("%-30s пропущено (verovio не установлен)" % "ноты переложения")
+except Exception:
+    print("ноты переложения FAIL (исключение)"); traceback.print_exc(); failed += 1
 # рецензент партитуры: отчёт строится на результате оркестровки K.545 из этого же теста
 try:
     import score_review

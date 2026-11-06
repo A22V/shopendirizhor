@@ -112,11 +112,15 @@ def review(piano_path, original_path=None):
         hand_of = lambda n: RH if n[3] == top else LH
     groups = _groups(notes)
     chords = []        # (старт, левая, правая)
+    hand_notes = []    # (старт, длина, высота, рука): те же ноты по рукам, для нот с пометками (score_notation.build_hands)
     for start, items in groups:
         if by_tracks:
             lh = sorted({n[2] for n in items if hand_of(n) == LH}); rh = sorted({n[2] for n in items if hand_of(n) == RH})
+            hand_notes += [(n[0], n[1], n[2], hand_of(n)) for n in items]
         else:
             lh, rh = split_chord([n[2] for n in items])
+            lhs = set(lh)
+            hand_notes += [(n[0], n[1], n[2], LH if n[2] in lhs else RH) for n in items]
         chords.append((start, lh, rh))
     n_bars = bar(max(n[0] + n[1] for n in notes) - 1e-6) if notes else 0
     play = [set() for _ in range(n_bars)]
@@ -180,7 +184,8 @@ def review(piano_path, original_path=None):
              "руки": "по дорожкам" if by_tracks else "по аккордам (одна дорожка, деление приблизительное)",
              "гармония": cover, "между_руками_больше_18": len(gaps)}
     return {"stats": stats, "findings": findings, "counts": counts, "marks": marks,
-            "grid": {"instruments": [RH, LH], "play": [sorted(s) for s in play]}}
+            "grid": {"instruments": [RH, LH], "play": [sorted(s) for s in play]},
+            "hand_notes": hand_notes, "bpb": bpb, "bpm": bpm}
 
 
 def _rng(bars):

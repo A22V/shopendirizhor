@@ -54,6 +54,57 @@ def build(review, musicxml_path=None, midi_path=None):
     review["notation_error"] = "\n---\n".join(errs)
 
 
+def build_hands(res):
+    """Ноты рояля с пометками для результата piano_review.review: два стана (правая и левая рука), как в переложении.
+    Руки берутся из res["hand_notes"] (те же, что проверяет рецензент), поэтому красные ноты совпадают с картой.
+    Ошибку не прячет: пишет её в res["notation_error"]."""
+    import traceback
+    if not res or not res.get("hand_notes"):
+        return
+    if not available():
+        res["notation_error"] = "не загружается библиотека verovio (%s)" % IMPORT_ERROR
+        return
+    try:
+        path = _hands_midi(res)
+        res["notation"] = prepare(midi_path=path, staff_names=[RH, LH])
+        res.pop("notation_error", None)
+    except Exception:
+        res["notation_error"] = traceback.format_exc(limit=3)
+
+
+def _hands_midi(res):
+    """Временный MIDI с двумя дорожками (правая, левая) по hand_notes; такт и темп берутся из проверки."""
+    import mido
+    tpb = 480
+    mid = mido.MidiFile(ticks_per_beat=tpb)
+    meta = mido.MidiTrack()
+    mid.tracks.append(meta)
+    meta.append(mido.MetaMessage("time_signature", numerator=max(1, round(res.get("bpb", 4.0))), denominator=4,
+                                 clocks_per_click=24, notated_32nd_notes_per_beat=8, time=0))
+    meta.append(mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(res.get("bpm") or 120), time=0))
+    for hand, latin in ((RH, "Right hand"), (LH, "Left hand")):   # имена станов задаются по порядку; в MIDI только латиница
+        tr = mido.MidiTrack()
+        mid.tracks.append(tr)
+        tr.append(mido.MetaMessage("track_name", name=latin, time=0))
+        ev = []
+        for start, dur, pitch, h in res["hand_notes"]:
+            if h != hand:
+                continue
+            on, off = round(start * tpb), round((start + dur) * tpb)
+            ev.append((on, 1, pitch))
+            ev.append((max(off, on + 1), 0, pitch))
+        last = 0
+        for tick, kind, pitch in sorted(ev):          # отпускание раньше нажатия на том же тике
+            if kind == 1:
+                tr.append(mido.Message("note_on", note=pitch, velocity=80, time=tick - last, channel=0))
+            else:
+                tr.append(mido.Message("note_off", note=pitch, velocity=0, time=tick - last, channel=0))
+            last = tick
+    out = os.path.join(tempfile.mkdtemp(prefix="hands_"), "piano_hands.mid")
+    mid.save(out)
+    return out
+
+
 def _midi_to_musicxml(midi_path):
     import music21
     sc = music21.converter.parse(midi_path)
@@ -62,8 +113,12 @@ def _midi_to_musicxml(midi_path):
     return out
 
 
-def prepare(musicxml_path=None, midi_path=None):
-    """Возвращает {"pages": [svg, ...], "cells": {(инструмент, такт): [id, ...]}, "page_of": {id: номер_страницы}}."""
+RH, LH = "Правая рука", "Левая рука"
+
+
+def prepare(musicxml_path=None, midi_path=None, staff_names=None):
+    """Возвращает {"pages": [svg, ...], "cells": {(инструмент, такт): [id, ...]}, "page_of": {id: номер_страницы}}.
+    staff_names: если заданы, имена станов берутся по порядку (для рояля: правая рука, левая рука)."""
     import verovio
     import score_review
     if not (musicxml_path and os.path.exists(musicxml_path)):
@@ -75,7 +130,10 @@ def prepare(musicxml_path=None, midi_path=None):
     root = ET.fromstring(tk.getMEI())
     # номер нотного стана -> название инструмента, как в рецензии ("Скрипка I" и т. д.)
     staff_name, violins = {}, 0
-    for sd in root.iter(MEI_NS + "staffDef"):
+    if staff_names:
+        for k, sd in enumerate(root.iter(MEI_NS + "staffDef")):
+            staff_name[sd.get("n")] = staff_names[k] if k < len(staff_names) else None
+    for sd in ([] if staff_names else root.iter(MEI_NS + "staffDef")):
         lab = sd.find(MEI_NS + "label")
         name = score_review._label_from_pair(lab.text if lab is not None and lab.text else "")
         if name and name.startswith("Скрипка"):

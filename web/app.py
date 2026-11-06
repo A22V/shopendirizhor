@@ -324,6 +324,7 @@ elif go and up is not None and mode == PIANO_REVIEW_MODE:
                 _rv = piano_review.review(_src, _orig)
                 if not _rv["stats"]["нот"]:
                     raise ValueError("в файле нет нот")
+                score_notation.build_hands(_rv)   # ноты с пометками; ошибка пишется в _rv["notation_error"]
                 st.session_state.result = {"mode": "piano_review", "review": _rv, "name": os.path.splitext(up.name)[0]}
             except Exception:
                 st.session_state.result = None
@@ -369,12 +370,34 @@ if res and res.get("mode") == "piano_review":
     for _, code, status, text in _rv["findings"]:
         st.markdown("**[%s]** %s" % (code, text))
         st.caption("Статус правила: " + status)
+    _only = None
     if _rv["findings"]:
         st.markdown("**Карта замечаний.** Строки: руки, столбцы: такты. Красное: место замечания.")
         _opts = ["Все замечания сразу"] + ["%d. [%s] %s" % (i + 1, f[1], f[3][:70]) for i, f in enumerate(_rv["findings"])]
         _pick = st.selectbox("Показать на карте", _opts, index=1 if len(_opts) > 1 else 0, key="pmap_pick")
-        st.markdown(score_review.map_html(_rv, only=None if _pick == _opts[0] else _opts.index(_pick) - 1), unsafe_allow_html=True)
-        st.caption("Ноты с красными пометками для переложения пока не показываются (только карта).")
+        _only = None if _pick == _opts[0] else _opts.index(_pick) - 1
+        st.markdown(score_review.map_html(_rv, only=_only), unsafe_allow_html=True)
+    _prep = _rv.get("notation")
+    if not _prep and _rv.get("notation_error"):
+        st.warning("Ноты с пометками на этот раз не построились (карта выше работает). "
+                   "Пришлите, пожалуйста, текст из раздела ниже разработчику.")
+        with st.expander("Почему нет нот (для разработчика)"):
+            st.code(_rv["notation_error"][-3000:])
+    if _prep:
+        import base64
+        _pages, _total = score_notation.colored_pages(_prep, score_notation.ids_for(_rv, _prep, _only), max_pages=4)
+        st.markdown("**Ноты с пометками.** Две строки: правая и левая рука. Красные ноты: место замечания "
+                    "(если выбрано одно). Показаны страницы %s%s." % (
+                        ", ".join(str(p) for p, _ in _pages),
+                        "" if _total <= len(_pages) else " (первые %d из %d; все страницы в файле ниже)" % (len(_pages), _total)))
+        for _p, _svg in _pages:
+            st.markdown("<div style='background:#fff;border:1px solid #d8ccb4;border-radius:6px;padding:6px;margin-bottom:8px'>"
+                        "<img style='width:100%%' src='data:image/svg+xml;base64,%s'/></div>" % base64.b64encode(_svg.encode("utf-8")).decode(),
+                        unsafe_allow_html=True)
+        st.download_button("Скачать ноты с пометками (HTML, открывается в браузере)",
+                           score_notation.standalone_html(_rv, _prep, title="Переложение с пометками").encode("utf-8"),
+                           file_name=res["name"] + "_переложение_с_пометками.html", mime="text/html",
+                           use_container_width=True, key="dl_piano_notes")
     st.download_button("Скачать отчёт и карту (HTML, открывается в браузере)",
                        score_review.map_html(_rv, standalone=True).encode("utf-8"),
                        file_name=res["name"] + "_проверка_переложения.html", mime="text/html", use_container_width=True)
