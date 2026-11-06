@@ -328,11 +328,16 @@ if res:
         if res.get("review"):
             try:
                 z.writestr(res["name"] + "_карта_замечаний.html", score_review.map_html(res["review"], standalone=True))
+            except Exception:
+                z.writestr(res["name"] + "_ОШИБКА_карты.txt", traceback.format_exc())
+            try:
                 if res["review"].get("notation"):
                     z.writestr(res["name"] + "_партитура_с_пометками.html",
                                score_notation.standalone_html(res["review"], res["review"]["notation"]))
+                elif res["review"].get("notation_error"):
+                    z.writestr(res["name"] + "_ОШИБКА_нот.txt", res["review"]["notation_error"])
             except Exception:
-                pass
+                z.writestr(res["name"] + "_ОШИБКА_нот.txt", traceback.format_exc())
     st.download_button("Скачать всё (ZIP)", buf.getvalue(), file_name=res["name"] + "_оркестровка.zip",
                        mime="application/zip", use_container_width=True)
     if res["mp3"]:
