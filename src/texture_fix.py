@@ -115,6 +115,67 @@ WINDS_MAX = 4          # эвристика (как K3 рецензента)
 LOUD = ("mf", "f", "ff")
 
 
+def figure_enabled():
+    return os.environ.get("ORCH_FIGURE", "") not in ("", "0", "false", "False")
+
+
+# ---------------------------------------------------------------------------
+# Бегущий аккомпанемент, который никто не играет (ORCH_FIGURE=1, по умолчанию выключено). Добавлено 2026-11-06.
+# Случай: прелюдия ми минор (шестнадцатые левой руки); после ORCH_MELODY_HELD они перестали быть «мелодией»,
+# а план модели дал фигурацию только одной фразе — в остальных бегущие ноты молчали.
+# Правило:
+#   * фраза без фигурации, в которой у фортепиано есть БЕГУЩЕЕ сопровождение: не меньше FIG_DENSITY нот на долю
+#     и средняя длина не больше полдоли (эвристика; вальсовое «умпа-па» четвертями не затрагивается);
+#   * фигурацию получает один струнный, не занятый во фразе (порядок как в ORCH_THIN: скрипка II, альт, скрипка I,
+#     виолончель). Быстрое — струнным: Черни, Op. 600, т. 3, с. 22 (подтверждено);
+#   * если все струнные заняты, на фигурацию переходит струнный второго внутреннего голоса (inner2): бегущие ноты
+#     и есть та же гармония, только в движении (эвристика); если inner2 у него один, этот голос во фразе исчезает;
+#   * во фразе с 8+ инструментами (порог «стены», как ORCH_THIN) новый инструмент не добавляется (только переход inner2).
+# ---------------------------------------------------------------------------
+FIG_DENSITY = 2.0        # эвристика: нот сопровождения на долю
+FIG_MAX_LEN = 0.5        # эвристика: средняя длина ноты сопровождения, в долях
+
+
+def _phrase_span(ph, bars):
+    a, b = ph["bars"]
+    if a < 1 or b > len(bars) or a > b:
+        return None
+    return bars[a - 1][0], bars[b - 1][0] + bars[b - 1][1]
+
+
+def fill_figuration(plan, fig, bars):
+    """fig: meta["fig"] из orchestrator.analyze; bars: meta["bars"]. Возвращает (новый_план, изменения по-русски)."""
+    plan = copy.deepcopy(plan)
+    changes = []
+    for ph in plan.get("phrases", []):
+        if ph.get("figuration"):
+            continue
+        span = _phrase_span(ph, bars)
+        if not span:
+            continue
+        lo, hi = span
+        notes = [f for f in fig if lo - 1e-9 <= f["offset"] < hi - 1e-9]
+        if not notes or len(notes) / (hi - lo) < FIG_DENSITY or sum(f["dur"] for f in notes) / len(notes) > FIG_MAX_LEN:
+            continue
+        core = {s[0] for r in CORE for s in ph.get(r, [])}
+        free = [n for n in STRINGS_PREF if n not in core]
+        where = "такты %d–%d" % tuple(ph["bars"])
+        if free and len(_used(ph)) < THIN_MIN:
+            ph["figuration"] = [[free[0], 0, None, None]]
+            changes.append("%s: бегущее сопровождение отдано (%s), раньше его никто не играл" % (where, STR_RU[free[0]]))
+            continue
+        inner2_str = [s for s in ph.get("inner2", []) if s[0] in STRINGS_PREF]
+        if inner2_str:
+            who = inner2_str[0]
+            ph["inner2"] = [s for s in ph["inner2"] if s is not who]
+            ph["figuration"] = [[who[0], 0, None, None]]
+            changes.append("%s: %s переходит со второго внутреннего голоса на бегущее сопровождение" % (where, STR_RU[who[0]]))
+    return plan, changes
+
+
+STR_RU = {"Violin I": "скрипка I", "Violin II": "скрипка II", "Viola": "альт", "Cello": "виолончель"}
+
+
 def winds_enabled():
     return os.environ.get("ORCH_WINDS", "") not in ("", "0", "false", "False")
 

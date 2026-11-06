@@ -79,6 +79,25 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("забытые духовые FAIL (исключение)"); traceback.print_exc(); failed += 1
+# бегущее сопровождение, которое никто не играет (texture_fix.fill_figuration, ORCH_FIGURE):
+# быстрое — свободному струнному; медленное («умпа-па» четвертями) и фразы с фигурацией не трогаются
+try:
+    import texture_fix
+    bars4 = [(0.0, 4.0), (4.0, 4.0)]
+    fast = [{"offset": i * 0.25, "dur": 0.25, "pitch": 52} for i in range(32)]
+    slow = [{"offset": float(i), "dur": 1.0, "pitch": 52} for i in range(8)]
+    base = {"phrases": [{"bars": [1, 2], "level": "mp", "melody": [["Violin I", 0]], "inner1": [["Violin II", 0]],
+                         "inner2": [], "bass": [["Cello", 0]], "figuration": []}]}
+    p1, c1 = texture_fix.fill_figuration(base, fast, bars4)
+    p2, c2 = texture_fix.fill_figuration(base, slow, bars4)
+    with_fig = {"phrases": [dict(base["phrases"][0], figuration=[["Viola", 0]])]}
+    p3, c3 = texture_fix.fill_figuration(with_fig, fast, bars4)
+    ok = (p1["phrases"][0]["figuration"] == [["Viola", 0, None, None]] and len(c1) == 1
+          and (p2, c2) == (base, []) and (p3, c3) == (with_fig, []))
+    print("%-30s %s  изменений=%d" % ("бегущее сопровождение", "OK " if ok else "FAIL", len(c1)))
+    failed += 0 if ok else 1
+except Exception:
+    print("бегущее сопровождение FAIL (исключение)"); traceback.print_exc(); failed += 1
 # ноты с пометками (нужен verovio; без него проверка пропускается)
 try:
     import score_notation
