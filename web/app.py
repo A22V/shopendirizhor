@@ -112,6 +112,45 @@ if up is not None and not up.name.lower().endswith((".mid", ".midi")):
     st.error("Это не MIDI-файл: «%s». Нужен файл с окончанием .mid или .midi." % up.name)
     up = None
 
+
+def source_mp3(data: bytes):
+    """MP3 загруженного файла как есть (до оркестровки или переложения). Считается один раз на файл:
+    Streamlit перезапускает страницу при каждом нажатии, поэтому результат хранится по отпечатку содержимого."""
+    import hashlib
+    key = hashlib.md5(data).hexdigest()
+    cached = st.session_state.get("source_mp3")
+    if cached and cached.get("key") == key:
+        return cached
+    work = tempfile.mkdtemp(prefix="source_")
+    mid, mp3 = os.path.join(work, "source.mid"), os.path.join(work, "source.mp3")
+    with open(mid, "wb") as f:
+        f.write(data)
+    res = {"key": key, "mp3": None, "soundfont": None, "error": None}
+    try:
+        out = audio_tools.render_mp3(mid, mp3)
+        res["mp3"] = open(out, "rb").read()
+        res["soundfont"] = os.path.basename(audio_tools.LAST_SOUNDFONT or "")
+    except Exception as e:
+        res["error"] = "%s: %s" % (type(e).__name__, e)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    st.session_state["source_mp3"] = res
+    return res
+
+
+if up is not None and up.size <= 2 * 1024 * 1024:
+    st.markdown("**Исходный файл:** так звучит загруженный MIDI до обработки.")
+    with st.spinner("Готовлю запись исходного файла..."):
+        _src = source_mp3(up.getvalue())
+    if _src["mp3"]:
+        st.audio(_src["mp3"], format="audio/mpeg")
+        if _src["soundfont"]:
+            st.caption("Звук сделан набором инструментов «%s»." % os.path.splitext(_src["soundfont"])[0])
+    else:
+        st.warning("Запись исходного файла сделать не удалось. Обработка файла от этого не зависит.")
+        with st.expander("Почему нет записи (для разработчика)"):
+            st.code(_src["error"] or "причина неизвестна")
+
 st.markdown("### 2. Что сделать")
 use_llm = False
 if LLM_READY:
