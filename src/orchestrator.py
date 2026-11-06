@@ -69,6 +69,20 @@ def analyze(path):
         cur = sky.get(on)
         if cur is None or midi > cur[0]:
             sky[on] = (midi, off_ - on)
+    if os.environ.get("ORCH_MELODY_HELD", "") not in ("", "0", "false", "False"):
+        # ORCH_MELODY_HELD=1 (выкл. по умолчанию): ноты, которые начинаются ПОД ещё звучащей верхней нотой
+        # (правая рука тянет, левая бежит), мелодией не считаются. Без этого мелодия «рассыпалась» на ноты
+        # аккомпанемента: прелюдия ми минор 71% ложных нот мелодии, ноктюрн ля минор 41% (2026-11-06).
+        import heapq
+        by_start, heap, k, keep = sorted(allnotes), [], 0, {}
+        for on in sorted(sky):
+            while k < len(by_start) and by_start[k][0] < on - 1e-6:
+                heapq.heappush(heap, (-by_start[k][2], by_start[k][1])); k += 1
+            while heap and heap[0][1] <= on + 1e-6:      # верхняя из начатых раньше уже закончилась
+                heapq.heappop(heap)
+            if not heap or -heap[0][0] <= sky[on][0]:
+                keep[on] = sky[on]
+        sky = keep
     melody = [{"offset": on, "dur": dur, "pitch": midi} for on, (midi, dur) in sorted(sky.items())]
     for i in range(len(melody) - 1):                 # trim each melody note so it never overlaps the next one
         gap = melody[i + 1]["offset"] - melody[i]["offset"]
