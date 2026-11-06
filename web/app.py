@@ -1,5 +1,5 @@
 """
-Шопендирижёр: веб-оболочка (Streamlit).
+Оркестратор (репозиторий shopendirizhor): веб-оболочка (Streamlit).
 Запуск локально:  streamlit run web/app.py
 Размещение в облаке: см. docs/DEPLOY.md
 """
@@ -26,62 +26,19 @@ import piano_review          # noqa: E402
 PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
 LLM_READY = bool(PROVIDER and PROVIDER_KEY and PROVIDER_MODEL)
 
-st.set_page_config(page_title="Шопендирижёр", page_icon="🎼", layout="centered")
+st.set_page_config(page_title="Оркестратор", page_icon="🎼", layout="centered")
 
-GOLD_SCROLL = (
-    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 60'>"
-    "<g fill='none' stroke='%23b8860b' stroke-width='2' stroke-linecap='round'>"
-    "<path d='M4 56 C 4 20, 30 6, 52 14 S 58 40, 40 42 S 28 30, 38 24'/>"
-    "<path d='M116 56 C 116 20, 90 6, 68 14 S 62 40, 80 42 S 92 30, 82 24'/>"
-    "<circle cx='60' cy='10' r='3' fill='%23b8860b'/>"
-    "<path d='M30 56 H90' stroke-width='1.2'/>"
-    "</g></svg>"
-)
-DIVIDER = (
-    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 24' width='300' height='24'>"
-    "<g fill='none' stroke='%23b8860b' stroke-width='1.5' stroke-linecap='round'>"
-    "<path d='M4 12 H110'/><path d='M190 12 H296'/>"
-    "<path d='M110 12 C 120 2, 132 2, 140 12 C 132 22, 120 22, 110 12'/>"
-    "<path d='M190 12 C 180 2, 168 2, 160 12 C 168 22, 180 22, 190 12'/>"
-    "<circle cx='150' cy='12' r='4' fill='%23b8860b'/>"
-    "</g></svg>"
-)
-
-import urllib.parse as _up
-BAROQUE_CSS = """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500&family=IM+Fell+English&display=swap');
-:root { --gold:#b8860b; --gold-soft:#d4af37; --wine:#5b1a22; --parchment:#f6efe0; --ink:#2b1d14; }
-html, body, [class*="css"] { font-family: 'Cormorant Garamond', 'Georgia', serif; color: var(--ink); }
-.stApp { background: radial-gradient(circle at top, #fbf6ea 0%, var(--parchment) 60%, #ead9b5 100%); }
-h1, h2, h3 { font-family: 'IM Fell English', 'Cormorant Garamond', serif !important; color: var(--wine); letter-spacing: .5px; }
-h1 { border-bottom: 2px double var(--gold); padding-bottom: .3rem; text-align: center; }
-.frame { border: 3px double var(--gold); border-radius: 6px; padding: 1.1rem 1.4rem; background: rgba(255,250,240,.7);
-         box-shadow: inset 0 0 0 4px rgba(184,134,11,.12); margin-bottom: 1rem; }
-.motto { text-align:center; font-style: italic; color: #6b4a1e; margin-top: -.6rem; }
-.stButton > button, .stDownloadButton > button {
-  background: linear-gradient(#7a2631, var(--wine)); color: #fff6df; border: 1px solid var(--gold);
-  font-family: 'Cormorant Garamond', serif; font-size: 1.05rem; letter-spacing: .4px; border-radius: 4px; }
-.stButton > button:hover, .stDownloadButton > button:hover { border-color: var(--gold-soft); color: #fff; }
-.warn { border-left: 4px solid var(--gold); padding: .4rem .8rem; background: rgba(184,134,11,.08); }
-.frame { position: relative; }
-.frame::before, .frame::after {
-  content: ""; position: absolute; width: 60px; height: 30px; pointer-events: none;
-  background-image: url("data:image/svg+xml;utf8,__SCROLL_URI__");
-  background-size: contain; background-repeat: no-repeat; opacity: .8;
-}
-.frame::before { top: -6px; left: -6px; }
-.frame::after { bottom: -6px; right: -6px; transform: rotate(180deg); }
-.divider { text-align: center; margin: -.4rem 0 .6rem; }
-
-</style>
-"""
-BAROQUE_CSS = BAROQUE_CSS.replace("__SCROLL_URI__", _up.quote(GOLD_SCROLL.replace('%23', '#'), safe="'=:/ "))
-st.markdown(BAROQUE_CSS, unsafe_allow_html=True)
-
-st.markdown("<div class='divider'>" + DIVIDER + "</div>", unsafe_allow_html=True)
-st.markdown("<h1>Шопендирижёр</h1>", unsafe_allow_html=True)
-st.markdown("<p class='motto'>Фортепианная пьеса — оркестровый наряд</p>", unsafe_allow_html=True)
+# Барочное оформление (вариант A: голубой дворец, золото, красный бархат): web/theme.py.
+# Украшения только в шапке, по краям и в углах листа; текст всегда на сплошном светлом листе.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import theme                 # noqa: E402
+st.markdown(theme.CSS(), unsafe_allow_html=True)
+_first_visit = not st.session_state.get("bq_opened")     # занавес раздвигается только при первом входе
+st.session_state["bq_opened"] = True
+st.markdown(theme.DECOR_TOP(curtain_open=_first_visit), unsafe_allow_html=True)
+st.markdown(theme.TITLE(), unsafe_allow_html=True)
+_wall = st.radio("Стена", ["глубокая", "светлая"], horizontal=True, key="wall")
+st.markdown("<style>" + theme.WALL_CSS("deep" if _wall == "глубокая" else "light") + "</style>", unsafe_allow_html=True)
 
 st.markdown("""<div class='frame'>
 <b>Оркестровка.</b> Загрузите сольную фортепианную пьесу в формате MIDI. Программа разберёт её на фразы и распределит по инструментам камерного состава: флейта, гобой, кларнет, фагот, валторна, скрипки, альт, виолончель, контрабас. На выходе: MIDI с дорожкой на каждый инструмент, нотный файл MusicXML и запись для прослушивания.<br><br>
@@ -105,7 +62,7 @@ with st.expander("Ограничения и приватность", expanded=Fa
 if "result" not in st.session_state:
     st.session_state.result = None
 
-st.markdown("### 1. Загрузите пьесу")
+st.markdown(theme.SECTION("I", "Загрузите пьесу"), unsafe_allow_html=True)
 # Без фильтра type: на планшетах (iPad, Android) браузер с фильтром ".mid" часто делает MIDI-файлы серыми
 # и их нельзя выбрать. Расширение проверяем сами.
 up = st.file_uploader("MIDI-файл (.mid, .midi)", accept_multiple_files=False)
@@ -152,7 +109,7 @@ if up is not None and up.size <= 2 * 1024 * 1024:
         with st.expander("Почему нет записи (для разработчика)"):
             st.code(_src["error"] or "причина неизвестна")
 
-st.markdown("### 2. Что сделать")
+st.markdown(theme.SECTION("II", "Что сделать"), unsafe_allow_html=True)
 use_llm = False
 if LLM_READY:
     use_llm = st.checkbox("Помощь модели (%s): план оркестровки или выбор голосов при переложении" % PROVIDER, value=True,
@@ -160,7 +117,7 @@ if LLM_READY:
 REVIEW_MODE = "Проверить партитуру (готовый оркестр)"
 PIANO_REVIEW_MODE = "Проверить переложение (готовое фортепиано)"
 mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", "Переложение для фортепиано (из оркестра)", REVIEW_MODE,
-                                PIANO_REVIEW_MODE], horizontal=True)
+                                PIANO_REVIEW_MODE], key="mode_pick")
 orig_up = None
 if mode == PIANO_REVIEW_MODE:
     st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
@@ -346,7 +303,7 @@ elif go and up is not None:
 
 res = st.session_state.result
 if res and res.get("mode") == "review":
-    st.markdown("### 3. Рецензия на партитуру")
+    st.markdown(theme.SECTION("III", "Рецензия на партитуру"), unsafe_allow_html=True)
     st.caption("Программа ничего не исправляет: она показывает, что нашла, и честно называет, чем подтверждено каждое правило.")
     show_review(res["review"])
     st.download_button("Скачать карту замечаний (HTML, открывается в браузере)",
@@ -354,7 +311,7 @@ if res and res.get("mode") == "review":
                        file_name=res["name"] + "_карта_замечаний.html", mime="text/html", use_container_width=True)
     res = None
 if res and res.get("mode") == "piano_review":
-    st.markdown("### 3. Проверка переложения")
+    st.markdown(theme.SECTION("III", "Проверка переложения"), unsafe_allow_html=True)
     st.caption("Программа ничего не исправляет: она показывает, что нашла, и честно называет, чем подтверждено каждое правило. "
                "Модуль считает, а не слушает: звучание оценивает слушатель.")
     _rv, _s = res["review"], res["review"]["stats"]
@@ -403,7 +360,7 @@ if res and res.get("mode") == "piano_review":
                        file_name=res["name"] + "_проверка_переложения.html", mime="text/html", use_container_width=True)
     res = None
 if res and res.get("mode") == "reduction":
-    st.markdown("### 3. Результат переложения")
+    st.markdown(theme.SECTION("III", "Результат переложения"), unsafe_allow_html=True)
     s = res["stats"]
     st.info("Оригинал: %d нот. Фортепиано: правая рука %d, левая %d. "
             "Сохранено высот гармонии: %.0f%%; в %.0f%% моментов звучат все высоты аккорда."
@@ -415,7 +372,7 @@ if res and res.get("mode") == "reduction":
                        file_name=res["name"] + "_piano.mid", mime="audio/midi", use_container_width=True)
     res = None
 if res:
-    st.markdown("### 3. Результат")
+    st.markdown(theme.SECTION("III", "Результат"), unsafe_allow_html=True)
     if res["mp3"]:
         st.audio(res["mp3"], format="audio/mpeg")
         _sf = os.path.basename(audio_tools.LAST_SOUNDFONT or "")
@@ -484,3 +441,5 @@ if res:
                            mime="audio/mpeg", use_container_width=True)
 
     st.caption("Нажимая «Создать оркестровку», вы подтверждаете, что имеете право обработать этот файл.")
+
+st.markdown(theme.FOOTER(), unsafe_allow_html=True)

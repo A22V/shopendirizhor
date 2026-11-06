@@ -1,0 +1,8 @@
+# Цвета встроенных элементов Streamlit (флажки, переключатели, рамка фокуса) под барочную тему web/theme.py.
+[theme]
+base = "light"
+primaryColor = "#8e1426"
+backgroundColor = "#fcf8ef"
+secondaryBackgroundColor = "#f5ecd7"
+textColor = "#2a1c12"
+font = "serif"
