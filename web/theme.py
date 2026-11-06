@@ -20,7 +20,8 @@ def _uri(svg):
 
 
 # --- стена с панелями (фон страницы); на стене нет текста ------------------------------------------
-# Два варианта цвета: «светлая» (бледно-голубая) и «глубокая» (насыщенный дворцовый голубой).
+# Плитка симметрична (панель по центру, полосы с рейками на обоих краях), чтобы узор был зеркальным
+# относительно листа. Два варианта цвета: «светлая» (бледно-голубая) и «глубокая» (насыщенный дворцовый голубой).
 WALLS = {
     "light": dict(base="#e3ecf5", stripe="#f1f6fb", panel="#ecf2f9", inner="#ffffff", line="#cdb36a", rose="#d6c07e"),
     "deep":  dict(base="#7d9ec4", stripe="#9ab7d6", panel="#89a9cd", inner="#e8f0f9", line="#e2c46e", rose="#e6cb7c"),
@@ -31,11 +32,12 @@ def _wall(c):
     return (
         "<svg xmlns='http://www.w3.org/2000/svg' width='280' height='440' viewBox='0 0 280 440'>"
         f"<rect width='280' height='440' fill='{c['base']}'/>"
-        f"<rect x='0' width='16' height='440' fill='{c['stripe']}'/><rect x='16' width='2' height='440' fill='{c['line']}' opacity='.6'/>"
-        f"<rect x='44' y='36' width='208' height='262' rx='10' fill='{c['panel']}' stroke='{c['line']}' stroke-width='1.6' opacity='.9'/>"
-        f"<rect x='56' y='48' width='184' height='238' rx='6' fill='none' stroke='{c['inner']}' stroke-width='2.2'/>"
-        f"<rect x='44' y='330' width='208' height='80' rx='6' fill='{c['panel']}' stroke='{c['line']}' stroke-width='1.4' opacity='.85'/>"
-        f"<rect x='56' y='340' width='184' height='60' rx='4' fill='none' stroke='{c['inner']}' stroke-width='1.6'/>"
+        f"<rect x='0' width='8' height='440' fill='{c['stripe']}'/><rect x='272' width='8' height='440' fill='{c['stripe']}'/>"
+        f"<rect x='8' width='1' height='440' fill='{c['line']}' opacity='.6'/><rect x='271' width='1' height='440' fill='{c['line']}' opacity='.6'/>"
+        f"<rect x='36' y='36' width='208' height='262' rx='10' fill='{c['panel']}' stroke='{c['line']}' stroke-width='1.6' opacity='.9'/>"
+        f"<rect x='48' y='48' width='184' height='238' rx='6' fill='none' stroke='{c['inner']}' stroke-width='2.2'/>"
+        f"<rect x='36' y='330' width='208' height='80' rx='6' fill='{c['panel']}' stroke='{c['line']}' stroke-width='1.4' opacity='.85'/>"
+        f"<rect x='48' y='340' width='184' height='60' rx='4' fill='none' stroke='{c['inner']}' stroke-width='1.6'/>"
         f"<rect x='0' y='312' width='280' height='3' fill='{c['line']}' opacity='.55'/>"
         "</svg>")
 
