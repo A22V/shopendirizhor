@@ -35,6 +35,24 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("редукция FAIL (исключение)"); traceback.print_exc(); failed += 1
+# проверка переложения (piano_review): наше переложение с оригиналом + искусственный аккорд с растяжкой и 6 нотами в руке
+try:
+    import piano_review, mido
+    pr = piano_review.review(os.path.join(outdir, "red_plain.mid"), src)
+    m = mido.MidiFile(ticks_per_beat=480)
+    for chord in ([72, 76, 79, 88], [40, 43, 47, 50, 53, 55]):          # правая: растяжка 16; левая: 6 нот
+        t = mido.MidiTrack(); m.tracks.append(t)
+        for p in chord: t.append(mido.Message("note_on", note=p, velocity=80, time=0))
+        for i, p in enumerate(chord): t.append(mido.Message("note_off", note=p, velocity=0, time=480 if i == 0 else 0))
+    m.save(os.path.join(outdir, "piano_bad.mid"))
+    bad = piano_review.review(os.path.join(outdir, "piano_bad.mid"))
+    codes = {f[1] for f in bad["findings"]}
+    ok = pr["stats"]["нот"] > 0 and pr["stats"]["гармония"] and codes >= {"P1", "P2"} and len(pr["marks"]) == len(pr["findings"])
+    print("%-30s %s  замечаний=%d  гармония=%.2f" % ("проверка переложения", "OK " if ok else "FAIL", len(pr["findings"]),
+                                                     (pr["stats"]["гармония"] or {}).get("среднее", 0)))
+    failed += 0 if ok else 1
+except Exception:
+    print("проверка переложения FAIL (исключение)"); traceback.print_exc(); failed += 1
 # рецензент партитуры: отчёт строится на результате оркестровки K.545 из этого же теста
 try:
     import score_review

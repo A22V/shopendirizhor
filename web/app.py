@@ -22,6 +22,7 @@ import llm_planner           # noqa: E402
 import reduction             # noqa: E402
 import score_review          # noqa: E402
 import score_notation        # noqa: E402
+import piano_review          # noqa: E402
 PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
 LLM_READY = bool(PROVIDER and PROVIDER_KEY and PROVIDER_MODEL)
 
@@ -157,8 +158,19 @@ if LLM_READY:
     use_llm = st.checkbox("Помощь модели (%s): план оркестровки или выбор голосов при переложении" % PROVIDER, value=True,
                           help="Модель пишет план по смыслу фраз, программа проверяет его.")
 REVIEW_MODE = "Проверить партитуру (готовый оркестр)"
-mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", "Переложение для фортепиано (из оркестра)", REVIEW_MODE], horizontal=True)
-go = st.button({"Оркестровка (из фортепиано)": "Создать оркестровку", REVIEW_MODE: "Проверить партитуру"}.get(mode, "Создать переложение"),
+PIANO_REVIEW_MODE = "Проверить переложение (готовое фортепиано)"
+mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", "Переложение для фортепиано (из оркестра)", REVIEW_MODE,
+                                PIANO_REVIEW_MODE], horizontal=True)
+orig_up = None
+if mode == PIANO_REVIEW_MODE:
+    st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
+               "сколько гармонии оркестра сохранилось в переложении.")
+    orig_up = st.file_uploader("Оркестровый оригинал (необязательно, .mid)", accept_multiple_files=False, key="orig_up")
+    if orig_up is not None and not orig_up.name.lower().endswith((".mid", ".midi")):
+        st.error("Оригинал не MIDI-файл: «%s»." % orig_up.name)
+        orig_up = None
+go = st.button({"Оркестровка (из фортепиано)": "Создать оркестровку", REVIEW_MODE: "Проверить партитуру",
+                PIANO_REVIEW_MODE: "Проверить переложение"}.get(mode, "Создать переложение"),
                disabled=up is None, use_container_width=True)
 
 
@@ -294,6 +306,30 @@ elif go and up is not None and mode == "Переложение для форте
                 st.error("Не удалось сделать редукцию. Проверьте, что это MIDI-файл оркестровки.")
                 with st.expander("Подробности для разработчика"):
                     st.code(traceback.format_exc())
+elif go and up is not None and mode == PIANO_REVIEW_MODE:
+    if up.size > 2 * 1024 * 1024 or (orig_up is not None and orig_up.size > 2 * 1024 * 1024):
+        st.error("Файл больше 2 МБ.")
+    else:
+        with st.spinner("Проверяю переложение..."):
+            try:
+                _work = tempfile.mkdtemp(prefix="preview_")
+                _src = os.path.join(_work, "piano.mid")
+                with open(_src, "wb") as _f:
+                    _f.write(up.getvalue())
+                _orig = None
+                if orig_up is not None:
+                    _orig = os.path.join(_work, "orchestra.mid")
+                    with open(_orig, "wb") as _f:
+                        _f.write(orig_up.getvalue())
+                _rv = piano_review.review(_src, _orig)
+                if not _rv["stats"]["нот"]:
+                    raise ValueError("в файле нет нот")
+                st.session_state.result = {"mode": "piano_review", "review": _rv, "name": os.path.splitext(up.name)[0]}
+            except Exception:
+                st.session_state.result = None
+                st.error("Не удалось проверить файл. Нужен MIDI фортепиано (одна или две дорожки).")
+                with st.expander("Подробности для разработчика"):
+                    st.code(traceback.format_exc())
 elif go and up is not None:
     if up.size > 2 * 1024 * 1024:
         st.error("Файл больше 2 МБ. Пожалуйста, загрузите более короткую пьесу.")
@@ -315,6 +351,33 @@ if res and res.get("mode") == "review":
     st.download_button("Скачать карту замечаний (HTML, открывается в браузере)",
                        score_review.map_html(res["review"], standalone=True).encode("utf-8"),
                        file_name=res["name"] + "_карта_замечаний.html", mime="text/html", use_container_width=True)
+    res = None
+if res and res.get("mode") == "piano_review":
+    st.markdown("### 3. Проверка переложения")
+    st.caption("Программа ничего не исправляет: она показывает, что нашла, и честно называет, чем подтверждено каждое правило. "
+               "Модуль считает, а не слушает: звучание оценивает слушатель.")
+    _rv, _s = res["review"], res["review"]["stats"]
+    st.caption("Тактов: %d, темп около %d уд/мин, нот: %d. Руки определены %s." % (_s["тактов"], _s["темп_уд_мин"], _s["нот"], _s["руки"]))
+    if _s.get("гармония"):
+        st.info("Сохранено высот гармонии оригинала: в среднем %.0f%%; все высоты аккорда звучат в %.0f%% моментов."
+                % (100 * _s["гармония"]["среднее"], 100 * _s["гармония"]["все_высоты"]))
+    if _s.get("между_руками_больше_18"):
+        st.caption("Справка: между руками больше 18 полутонов в %d аккордах. Число не подтверждено источником, "
+                   "в фортепианной музыке это обычно, поэтому это не замечание." % _s["между_руками_больше_18"])
+    if not _rv["findings"]:
+        st.success("Замечаний нет.")
+    for _, code, status, text in _rv["findings"]:
+        st.markdown("**[%s]** %s" % (code, text))
+        st.caption("Статус правила: " + status)
+    if _rv["findings"]:
+        st.markdown("**Карта замечаний.** Строки: руки, столбцы: такты. Красное: место замечания.")
+        _opts = ["Все замечания сразу"] + ["%d. [%s] %s" % (i + 1, f[1], f[3][:70]) for i, f in enumerate(_rv["findings"])]
+        _pick = st.selectbox("Показать на карте", _opts, index=1 if len(_opts) > 1 else 0, key="pmap_pick")
+        st.markdown(score_review.map_html(_rv, only=None if _pick == _opts[0] else _opts.index(_pick) - 1), unsafe_allow_html=True)
+        st.caption("Ноты с красными пометками для переложения пока не показываются (только карта).")
+    st.download_button("Скачать отчёт и карту (HTML, открывается в браузере)",
+                       score_review.map_html(_rv, standalone=True).encode("utf-8"),
+                       file_name=res["name"] + "_проверка_переложения.html", mime="text/html", use_container_width=True)
     res = None
 if res and res.get("mode") == "reduction":
     st.markdown("### 3. Результат переложения")
