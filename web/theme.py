@@ -183,6 +183,7 @@ h3::after {{ content: ""; flex: 1; height: 1px; background: linear-gradient(90de
   box-shadow: inset 0 1px 0 rgba(255,255,255,.25), inset 0 0 0 3px rgba(239,210,122,.18), 0 3px 8px rgba(78,7,18,.3);
   font-family: 'Cormorant SC', 'Cormorant Garamond', serif !important; font-size: 1.2rem !important; letter-spacing: .8px;
   min-height: 3rem; }}
+.stButton > button p, .stDownloadButton > button p, .stButton > button span, .stDownloadButton > button span {{ color: #fff6df !important; }}
 .stButton > button:hover, .stDownloadButton > button:hover {{ border-color: var(--gold-hi) !important; filter: brightness(1.08); }}
 .stButton > button:focus-visible {{ outline: 3px solid var(--navy); outline-offset: 2px; }}
 /* поле загрузки */
