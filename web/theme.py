@@ -34,9 +34,6 @@ def _wall(c):
         f"<rect x='0' width='16' height='440' fill='{c['stripe']}'/><rect x='16' width='2' height='440' fill='{c['line']}' opacity='.6'/>"
         f"<rect x='44' y='36' width='208' height='262' rx='10' fill='{c['panel']}' stroke='{c['line']}' stroke-width='1.6' opacity='.9'/>"
         f"<rect x='56' y='48' width='184' height='238' rx='6' fill='none' stroke='{c['inner']}' stroke-width='2.2'/>"
-        f"<g transform='translate(148 92)' fill='{c['rose']}' opacity='.8'>"
-        + "".join("<ellipse cx='0' cy='-10' rx='4.2' ry='9' transform='rotate(%d)'/>" % a for a in range(0, 360, 45))
-        + "<circle r='4.5' fill='#c9a13b'/></g>"
         f"<rect x='44' y='330' width='208' height='80' rx='6' fill='{c['panel']}' stroke='{c['line']}' stroke-width='1.4' opacity='.85'/>"
         f"<rect x='56' y='340' width='184' height='60' rx='4' fill='none' stroke='{c['inner']}' stroke-width='1.6'/>"
         f"<rect x='0' y='312' width='280' height='3' fill='{c['line']}' opacity='.55'/>"
