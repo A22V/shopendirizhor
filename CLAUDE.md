@@ -54,7 +54,7 @@
 
 ## 8. Технические заметки
 - Тесты: `python tests/smoke_test.py` (около минуты). Ожидаемо: предупреждения QX06/QX04/QX08/G03 на отдельных пьесах.
-- Звук: fluidsynth и ffmpeg, банк в `soundfonts/` (`TimGM6mb.sf2`; у пользователя есть `MS Basic.sf3` 48,9 МБ, он не загружен в GitHub из-за лимита веб-интерфейса).
+- Звук: fluidsynth и ffmpeg, банки в `soundfonts/`: **`MS Basic.sf3` (51 МБ, MuseScore 4, MIT) загружен 2026-11-06** через git от пользователя; `TimGM6mb.sf2` остался запасным. `audio_tools.render_wav` пробует банки по убыванию размера и при сбое (например, нехватка памяти в облаке; локально MS Basic через pretty_midi занял около 785 МБ) берёт следующий; `audio_tools.LAST_SOUNDFONT` показывается подписью под плеером. В облаке на 2026-11-06 не проверено, хватает ли памяти. Звук меняется только в MP3, ноты те же.
 - Очистка: в `src/orchestrator.py` и `src/phrase_planner.py` есть `sys.path.insert(0, "/mnt/user-data/outputs")`, а `validator.RULES_PATH` указывает туда же (не используется). Это следы старой среды; безопасно убрать, проверив тестами.
 - Облако: `requirements-web.txt`, `packages.txt`, секреты в Streamlit Secrets становятся переменными окружения.
 
