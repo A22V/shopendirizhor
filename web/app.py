@@ -285,6 +285,10 @@ if res:
     st.markdown("### 3. Результат")
     if res["mp3"]:
         st.audio(res["mp3"], format="audio/mpeg")
+        _sf = os.path.basename(audio_tools.LAST_SOUNDFONT or "")
+        if _sf:
+            st.caption("Звук сделан набором инструментов «%s»%s." % (os.path.splitext(_sf)[0],
+                       "" if "MS Basic" in _sf else " (маленький набор: звучит проще, чем в MuseScore)"))
     else:
         st.info("Звуковая запись сейчас недоступна на сервере. Скачайте MIDI и откройте его в программе для музыки.")
 
