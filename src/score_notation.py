@@ -20,12 +20,38 @@ OPTIONS = {"pageWidth": 2400, "pageHeight": 3000, "scale": 30, "adjustPageHeight
            "pageMarginTop": 40, "pageMarginBottom": 40, "svgViewBox": True}
 
 
+IMPORT_ERROR = None
+
+
 def available():
+    global IMPORT_ERROR
     try:
         import verovio  # noqa: F401
         return True
-    except Exception:
+    except Exception as e:
+        IMPORT_ERROR = "%s: %s" % (type(e).__name__, e)
         return False
+
+
+def build(review, musicxml_path=None, midi_path=None):
+    """Строит ноты для рецензии и кладёт их в review["notation"]. Ошибку НЕ прячет: пишет её в review["notation_error"],
+    чтобы приложение показало, почему нот нет (2026-11-06: в облаке ноты пропали молча, причину не было видно)."""
+    import traceback
+    if not review:
+        return
+    if not available():
+        review["notation_error"] = "не загружается библиотека verovio (%s)" % IMPORT_ERROR
+        return
+    errs = []
+    for kw in ({"musicxml_path": musicxml_path, "midi_path": midi_path}, {"midi_path": midi_path}):
+        if kw.get("musicxml_path") is None and "musicxml_path" in kw: continue
+        try:
+            review["notation"] = prepare(**kw)
+            review.pop("notation_error", None)
+            return
+        except Exception:
+            errs.append(traceback.format_exc(limit=3))
+    review["notation_error"] = "\n---\n".join(errs)
 
 
 def _midi_to_musicxml(midi_path):

@@ -149,11 +149,7 @@ def process(data: bytes, name: str, use_llm_flag: bool = False):
         review = score_review.review(stem + ".mid", stem + ".musicxml")
     except Exception:
         review = None
-    try:   # ноты с пометками (verovio); без него просто не показываем
-        if review and score_notation.available():
-            review["notation"] = score_notation.prepare(stem + ".musicxml", stem + ".mid")
-    except Exception:
-        pass
+    score_notation.build(review, stem + ".musicxml", stem + ".mid")   # ноты с пометками; ошибка пишется в review["notation_error"]
     return {"work": work, "stem": stem, "plan": plan, "report": report, "issues": issues, "llm_log": llm_log,
             "mp3": mp3, "name": os.path.splitext(name)[0], "review": review}
 
@@ -179,6 +175,11 @@ def show_review(review, expanded=True):
         only = None if pick == opts[0] else opts.index(pick) - 1
         st.markdown(score_review.map_html(review, only=only), unsafe_allow_html=True)
         prep = review.get("notation")
+        if not prep and review.get("notation_error"):
+            st.warning("Ноты с пометками на этот раз не построились (карта выше работает). "
+                       "Пришлите, пожалуйста, текст из раздела ниже разработчику.")
+            with st.expander("Почему нет нот (для разработчика)"):
+                st.code(review["notation_error"][-3000:])
         if prep:
             import base64
             pages, total = score_notation.colored_pages(prep, score_notation.ids_for(review, prep, only), max_pages=4)
@@ -207,11 +208,7 @@ if go and up is not None and mode == REVIEW_MODE:
                 _rv = score_review.review(_src)
                 if not _rv["stats"]["тактов"]:
                     raise ValueError("в файле не найдено ни одной дорожки оркестровых инструментов")
-                try:
-                    if score_notation.available():
-                        _rv["notation"] = score_notation.prepare(midi_path=_src)
-                except Exception:
-                    pass
+                score_notation.build(_rv, None, _src)
                 st.session_state.result = {"mode": "review", "review": _rv, "name": os.path.splitext(up.name)[0]}
             except Exception:
                 st.session_state.result = None
