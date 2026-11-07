@@ -65,10 +65,48 @@ if "result" not in st.session_state:
 st.markdown(theme.SECTION("I", "Загрузите пьесу"), unsafe_allow_html=True)
 # Без фильтра type: на планшетах (iPad, Android) браузер с фильтром ".mid" часто делает MIDI-файлы серыми
 # и их нельзя выбрать. Расширение проверяем сами.
-up = st.file_uploader("MIDI-файл (.mid, .midi)", accept_multiple_files=False)
-if up is not None and not up.name.lower().endswith((".mid", ".midi")):
-    st.error("Это не MIDI-файл: «%s». Нужен файл с окончанием .mid или .midi." % up.name)
-    up = None
+class _Upload:
+    """Проверенный MIDI: имя всегда с .mid, содержимое — чистый MIDI (как у объекта загрузки Streamlit)."""
+    def __init__(self, name, data):
+        self.name, self._data, self.size = name, data, len(data)
+
+    def getvalue(self):
+        return self._data
+
+
+MIDI_EXTS = (".mid", ".midi", ".kar", ".rmi", ".smf", ".bin", ".dat", ".tmp")
+
+
+def midi_bytes(data: bytes):
+    """Содержимое MIDI или None. MIDI узнаём по признаку «MThd» внутри файла, а не по имени: телефон (Telegram,
+    WhatsApp, Google Диск, «Загрузки» на Android) часто отдаёт файл без окончания .mid или с другим окончанием.
+    RIFF-MIDI (.rmi) и файлы с небольшим служебным заголовком перед MIDI тоже принимаются."""
+    if data[:4] == b"MThd":
+        return data
+    i = data.find(b"MThd", 0, 512)
+    if i > 0 and (data[:4] == b"RIFF" or i <= 256):
+        return data[i:]
+    return None
+
+
+def checked_midi(f, what="Файл"):
+    if f is None:
+        return None
+    midi = midi_bytes(f.getvalue())
+    name = f.name or "пьеса"
+    if midi is None:
+        st.error("%s «%s» не похож на MIDI: внутри нет признака MIDI-файла. Если вы уверены, что это MIDI, "
+                 "пришлите его разработчику." % (what, name))
+        return None
+    stem, ext = os.path.splitext(name)
+    if ext.lower() not in MIDI_EXTS:
+        stem = name                    # «Прелюдия» или «document_1234»: окончания нет, имя оставляем целиком
+    if not name.lower().endswith((".mid", ".midi")):
+        st.caption("Имя «%s» без окончания .mid, но внутри MIDI: файл принят." % name)
+    return _Upload(stem + ".mid", midi)
+
+
+up = checked_midi(st.file_uploader("MIDI-файл (.mid, .midi)", accept_multiple_files=False))
 
 
 def source_mp3(data: bytes):
@@ -122,10 +160,8 @@ orig_up = None
 if mode == PIANO_REVIEW_MODE:
     st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
                "сколько гармонии оркестра сохранилось в переложении.")
-    orig_up = st.file_uploader("Оркестровый оригинал (необязательно, .mid)", accept_multiple_files=False, key="orig_up")
-    if orig_up is not None and not orig_up.name.lower().endswith((".mid", ".midi")):
-        st.error("Оригинал не MIDI-файл: «%s»." % orig_up.name)
-        orig_up = None
+    orig_up = checked_midi(st.file_uploader("Оркестровый оригинал (необязательно, .mid)", accept_multiple_files=False,
+                                            key="orig_up"), "Оригинал")
 go = st.button({"Оркестровка (из фортепиано)": "Создать оркестровку", REVIEW_MODE: "Проверить партитуру",
                 PIANO_REVIEW_MODE: "Проверить переложение"}.get(mode, "Создать переложение"),
                disabled=up is None, use_container_width=True)
