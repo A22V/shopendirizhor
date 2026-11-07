@@ -66,11 +66,28 @@ def _roman(n):
     return ["", "I", "II", "III", "IV", "V", "VI"][n] if n < 7 else str(n)
 
 
+def readable(name):
+    """Название дорожки по-человечески. mido читает текст MIDI как латиницу, а русские названия записаны в UTF-8
+    или Windows-1251 — получаются «кракозябры»; переводим обратно (2026-11-08)."""
+    if not name or all(ord(c) < 128 for c in name):
+        return name or ""
+    try:
+        raw = name.encode("latin-1")
+    except UnicodeEncodeError:
+        return name                      # уже нормальный текст
+    for enc in ("utf-8", "cp1251"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return name
+
+
 def _midi_tracks(mid):
     """Дорожки с нотами: [{"index", "name", "channels", "program", "notes", "drum"}]."""
     out = []
     for i, tr in enumerate(mid.tracks):
-        name, chans, prog, n = (tr.name or "").strip(), set(), None, 0
+        name, chans, prog, n = readable((tr.name or "").strip()), set(), None, 0
         for m in tr:
             if m.type == "program_change" and prog is None:
                 prog = m.program
@@ -78,7 +95,7 @@ def _midi_tracks(mid):
                 chans.add(m.channel)
                 n += 1
             if m.type == "track_name" and not name:
-                name = m.name.strip()
+                name = readable(m.name.strip())
         if n:
             out.append({"index": i, "name": name, "channels": sorted(chans), "program": prog, "notes": n,
                         "drum": chans == {9}})
@@ -92,7 +109,9 @@ def _number(parts):
         count[p["key"]] = count.get(p["key"], 0) + 1
     seen = {}
     for p in parts:
-        if count[p["key"]] > 1 and not re.search(r"\b(i{1,3}|iv|\d)\b", p["source"].lower()):
+        # номер из названия берём, только если в названии сам инструмент («Violin 2»), а не «Track 7»
+        own = identify(p["source"])[0] == p["key"]
+        if count[p["key"]] > 1 and (not own or not re.search(r"\b(i{1,3}|iv|\d)\b", p["source"].lower())):
             seen[p["key"]] = seen.get(p["key"], 0) + 1
             p["label"] = "%s %s" % (p["label"], _roman(seen[p["key"]]))
         elif count[p["key"]] > 1:
@@ -261,6 +280,43 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
     return {"parts": [{k: p.get(k) for k in ("key", "label", "source", "channels")} for p in parts],
             "pages": pages, "timemap": timemap, "tempo": tempo_map(smid), "length": smid.length,
             "sound": sound, "notes": notes, "name": name}
+
+
+REVIEW_NAMES = {"flute": "Flute", "oboe": "Oboe", "clarinet": "Clarinet", "bassoon": "Bassoon", "horn": "Horn",
+                "violin": "Violin", "viola": "Viola", "cello": "Violoncello", "bass": "Contrabass"}
+
+
+def name_tracks(data):
+    """Дорожкам с нотами, чьи названия рецензент (src/score_review.py) не понимает («Track 1», «Скрипка», пусто),
+    даёт его английские названия по нашему распознаванию (название на любом языке, иначе номер инструмента GM).
+    Возвращает (байты MIDI, [«было → стало»]). Ноты не меняются (2026-11-08)."""
+    import score_review
+    mid = mido.MidiFile(file=io.BytesIO(data))
+    info = _midi_tracks(mid)
+    keys = [identify(t["name"], t["program"], t["drum"])[0] for t in info]
+    violins = sum(1 for k in keys if k == "violin")
+    seen_v, changes = 0, []
+    for t, k in zip(info, keys):
+        if k == "violin":
+            seen_v += 1
+        if score_review._key(t["name"]) or k not in REVIEW_NAMES:
+            continue
+        new = REVIEW_NAMES[k]
+        if k == "violin":
+            new = "Violin II" if (violins > 1 and seen_v > 1) else "Violin I"
+        tr = mid.tracks[t["index"]]
+        for i, m in enumerate(tr):
+            if m.type == "track_name":
+                tr[i] = m.copy(name=new)
+                break
+        else:
+            tr.insert(0, mido.MetaMessage("track_name", name=new, time=0))
+        changes.append("«%s» → %s" % (t["name"] or "без названия", BY_KEY[k][0]))
+    if not changes:
+        return data, []
+    buf = io.BytesIO()
+    mid.save(file=buf)
+    return buf.getvalue(), changes
 
 
 def summary(prep):

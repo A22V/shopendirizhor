@@ -234,6 +234,29 @@ try:
         print("%-30s пропущено (verovio не установлен)" % "ноты с пометками")
 except Exception:
     print("ноты с пометками FAIL (исключение)"); traceback.print_exc(); failed += 1
+# ремонт MIDI на входе: трудные файлы с сайтов и из мессенджеров открываются, ноты не меняются
+try:
+    import io as _io, struct as _struct, zipfile as _zip, mido as _md, midi_repair
+    _g = open(os.path.join(ROOT, "input", "test_piano_input.mid"), "rb").read()
+    _bz = _io.BytesIO(); _z = _zip.ZipFile(_bz, "w"); _z.writestr("p.mid", _g); _z.close()
+    _d = bytearray(_g); _k = _d.find(b"MTrk", 14); _d[_k + 4:_k + 8] = _struct.pack(">I", 10 ** 6)
+    _cases = {"обычный": _g, "обрезан": _g[: int(len(_g) * 0.8)], "длина дорожки": bytes(_d), "zip": _bz.getvalue(),
+              "RIFF": b"RIFF" + b"\0" * 4 + b"RMIDdata" + b"\0" * 4 + _g, "мусор спереди": b"\0" * 128 + _g}
+    for _n, _b in _cases.items():
+        _c, _fx = midi_repair.repair(_b, _n)
+        _md.MidiFile(file=_io.BytesIO(_c))
+    _notes = lambda m: sorted((sum(x.time for x in tr[:i + 1]), x.note) for tr in m.tracks for i, x in enumerate(tr)
+                              if x.type == "note_on" and x.velocity)
+    _ok = _notes(_md.MidiFile(file=_io.BytesIO(midi_repair.repair(_g)[0]))) == _notes(_md.MidiFile(file=_io.BytesIO(_g)))
+    for _bad in (b"ID3" + b"\0" * 100, b"<?xml version='1.0'?><score-partwise/>"):
+        try:
+            midi_repair.repair(_bad); _ok = False
+        except midi_repair.MidiRepairError:
+            pass
+    print("%-30s %s  случаев=%d" % ("ремонт MIDI", "OK " if _ok else "FAIL", len(_cases)))
+    failed += 0 if _ok else 1
+except Exception:
+    print("ремонт MIDI FAIL (исключение)"); traceback.print_exc(); failed += 1
 # партитурный проигрыватель: распознавание инструментов, порядок станов, ноты, карта времени, страница
 try:
     import score_player

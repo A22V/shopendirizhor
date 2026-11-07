@@ -13,7 +13,7 @@ ROOT = os.path.dirname(WEB)
 for p in (os.path.join(ROOT, "src"), WEB):
     if p not in sys.path:
         sys.path.insert(0, p)
-import score_player, player_html, jobs   # noqa: E402
+import score_player, player_html, jobs, midi_repair   # noqa: E402
 
 st.set_page_config(page_title="Проигрыватель партитуры", page_icon="🎼", layout="wide")
 st.markdown("""<style>
@@ -61,10 +61,18 @@ if up is not None:
     if len(data) > MAX_MB * 1024 * 1024:
         st.error("Файл больше %d МБ." % MAX_MB)
         st.stop()
-    if not (data[:4] == b"MThd" or score_player.is_musicxml(data, up.name)):
-        st.error("Это не MIDI и не MusicXML. Нужен файл .mid или .musicxml/.xml/.mxl.")
-        st.stop()
-    src = (data, up.name)
+    if score_player.is_musicxml(data, up.name) and b"MThd" not in data[:4096]:
+        src = (data, up.name)
+    else:                       # любой MIDI проходит ремонт (src/midi_repair.py), ноты не меняются
+        try:
+            clean, fixes = midi_repair.repair(data, up.name)
+        except midi_repair.MidiRepairError as e:
+            st.error("Файл «%s» не открылся: %s. Нужен MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl)." % (up.name, e))
+            st.stop()
+        if fixes:
+            st.caption("✔ " + midi_repair.text(fixes))
+        base = os.path.splitext(up.name)[0] if up.name.lower().endswith((".mid", ".midi", ".kar", ".rmi", ".zip")) else up.name
+        src = (clean, base + ".mid")
 elif src:
     st.info("Открыта оркестровка «%s». Можно открыть и другой файл кнопкой выше." % src[1])
 

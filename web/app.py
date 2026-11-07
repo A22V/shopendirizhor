@@ -26,6 +26,8 @@ import quality_gate          # noqa: E402
 import score_notation        # noqa: E402
 import piano_review          # noqa: E402
 import resources             # noqa: E402
+import midi_repair           # noqa: E402
+import score_player          # noqa: E402
 PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
 LLM_READY = bool(PROVIDER and PROVIDER_KEY and PROVIDER_MODEL)
 
@@ -99,18 +101,26 @@ def midi_bytes(data: bytes):
 
 
 def checked_midi(f, what="Файл"):
+    """Принятый MIDI или None. С 2026-11-08 каждый файл проходит ремонт (src/midi_repair.py): нестандартные и
+    повреждённые MIDI с сайтов и из мессенджеров переписываются в чистый стандартный MIDI; ноты не меняются."""
     if f is None:
         return None
-    midi = midi_bytes(f.getvalue())
     name = f.name or "пьеса"
-    if midi is None:
-        st.error("%s «%s» не похож на MIDI: внутри нет признака MIDI-файла. Если вы уверены, что это MIDI, "
-                 "пришлите его разработчику." % (what, name))
+    try:
+        midi, fixes = midi_repair.repair(f.getvalue(), name)
+    except midi_repair.MidiRepairError as e:
+        st.error("%s «%s» не открылся: %s." % (what, name, e))
+        return None
+    except Exception as e:                 # неожиданное: показываем причину, а не молчим
+        st.error("%s «%s» не открылся из-за ошибки программы: %s: %s. Пришлите файл разработчику."
+                 % (what, name, type(e).__name__, e))
         return None
     stem, ext = os.path.splitext(name)
     if ext.lower() not in MIDI_EXTS:
         stem = name                    # «Прелюдия» или «document_1234»: окончания нет, имя оставляем целиком
-    if not name.lower().endswith((".mid", ".midi")):
+    if fixes:
+        st.caption("✔ " + midi_repair.text(fixes))
+    elif not name.lower().endswith((".mid", ".midi")):
         st.caption("Имя «%s» без окончания .mid, но внутри MIDI: файл принят." % name)
     return _Upload(stem + ".mid", midi)
 
@@ -424,8 +434,12 @@ if go and up is not None and mode == REVIEW_MODE:
             try:
                 _work = tempfile.mkdtemp(prefix="review_")
                 _src = os.path.join(_work, "score.mid")
+                # дорожки «Track 1» / без названия / по-русски: рецензент узнаёт инструменты по названию или номеру
+                _named, _renamed = score_player.name_tracks(up.getvalue())
+                if _renamed:
+                    st.caption("Инструменты узнаны по дорожкам: " + "; ".join(_renamed) + ".")
                 with open(_src, "wb") as _f:
-                    _f.write(up.getvalue())
+                    _f.write(_named)
                 _prog.go("review")
                 _rv = score_review.review(_src)
                 if not _rv["stats"]["тактов"]:
@@ -437,8 +451,9 @@ if go and up is not None and mode == REVIEW_MODE:
             except Exception:
                 _prog.abort()
                 st.session_state.result = None
-                st.error("Не удалось проверить файл. Нужен MIDI оркестровки, где дорожки названы по инструментам "
-                         "(Flute, Oboe, Clarinet, Bassoon, Horn, Violin, Viola, Cello, Double Bass).")
+                st.error("Не удалось проверить файл: %s. Нужен MIDI оркестра (несколько дорожек с инструментами: "
+                         "флейта, гобой, кларнет, фагот, валторна, скрипки, альт, виолончель, контрабас)."
+                         % (sys.exc_info()[1] or "причина ниже"))
                 with st.expander("Подробности для разработчика"):
                     st.code(traceback.format_exc())
 elif go and up is not None and mode == "Переложение для фортепиано (из оркестра)":
