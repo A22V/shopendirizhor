@@ -34,7 +34,8 @@ st.set_page_config(page_title="Оркестратор", page_icon="🎼", layout
 # Украшения только в шапке, по краям и в углах листа; текст всегда на сплошном светлом листе.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import theme                 # noqa: E402
-import progress              # noqa: E402
+import progress
+import jobs              # noqa: E402
 st.markdown(theme.CSS(), unsafe_allow_html=True)
 _first_visit = not st.session_state.get("bq_opened")     # занавес раздвигается только при первом входе
 st.session_state["bq_opened"] = True
@@ -56,7 +57,7 @@ st.markdown("""<div class='frame warn'>
 
 with st.expander("Ограничения и приватность", expanded=False):
     st.markdown("""
-- Загружайте только свои пьесы или пьесы, права на которые у вас есть. Загруженные файлы хранятся только на время обработки и удаляются после неё.
+- Загружайте только свои пьесы или пьесы, права на которые у вас есть. Загруженный файл и результат оркестровки хранятся на сервере не дольше 6 часов (чтобы результат не терялся, если на телефоне погас экран), потом удаляются.
 - Максимальный размер файла — 2 МБ (около 2000 нот).
 - Программа не умеет превращать запись живой игры (mp3/wav) в MIDI: нужен MIDI с ровным, квантованным ритмом.
 - Пьесы короче 3 тактов и длиннее 100 тактов дают неудовлетворительный результат.
@@ -192,11 +193,11 @@ go = st.button({"Оркестровка (из фортепиано)": "Созд�
                disabled=up is None, use_container_width=True)
 
 
-def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=None, perc=False):
+def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=None, perc=False, work=None):
     """Runs the full pipeline in a private temporary folder and returns the list of result files.
     prog: progress.Steps (шаги llm/plan, mp3, review, notes) или None."""
     step = (lambda k: prog.go(k)) if prog else (lambda k: None)
-    work = tempfile.mkdtemp(prefix="shopendirizhor_")
+    work = work or tempfile.mkdtemp(prefix="shopendirizhor_")
     src = os.path.join(work, "input.mid")
     with open(src, "wb") as f:
         f.write(data)
@@ -412,18 +413,75 @@ elif go and up is not None:
     if up.size > 2 * 1024 * 1024:
         st.error("Файл больше 2 МБ. Пожалуйста, загрузите более короткую пьесу.")
     else:
-        _prog = progress.Steps([("llm", "модель пишет план, программа расставляет ноты") if use_llm else
-                                ("plan", "план фраз и ноты"), ("mp3", "запись MP3"), ("review", "рецензия"),
-                                ("notes", "ноты с пометками")], progress.midi_seconds(up.getvalue()))
-        with st.spinner("Оркестровка выполняется..."):
-            try:
-                st.session_state.result = process(up.getvalue(), up.name, use_llm_flag=use_llm, prog=_prog, solo=solo, perc=perc)
-            except Exception as e:
-                _prog.abort()
-                st.session_state.result = None
-                st.error("Не удалось обработать файл. Проверьте, что это сольная фортепианная пьеса в MIDI с ровным ритмом.")
-                with st.expander("Подробности для разработчика"):
-                    st.code(traceback.format_exc())
+        # Работа идёт в фоне на сервере (web/jobs.py): не теряется, если на телефоне погас экран или открыто другое
+        # приложение. Номер задания пишется в адрес страницы; тот же файл с теми же настройками второй раз не считается.
+        _steps = [("llm", "модель пишет план, программа расставляет ноты") if use_llm else ("plan", "план фраз и ноты"),
+                  ("mp3", "запись MP3"), ("review", "рецензия"), ("notes", "ноты с пометками")]
+        _data, _name = up.getvalue(), up.name
+        _jk = jobs.key(_data, {"name": _name, "llm": bool(use_llm), "solo": solo, "perc": bool(perc)})
+        jobs.start(_jk, lambda _p, _w: process(_data, _name, use_llm_flag=use_llm, prog=_p, solo=solo, perc=perc, work=_w),
+                   _steps, progress.midi_seconds(_data))
+        st.session_state.job, st.session_state.job_loaded, st.session_state.result = _jk, None, None
+        try:
+            st.query_params["job"] = _jk
+        except Exception:
+            pass
+
+# Фоновое задание оркестровки: показать прогресс или забрать готовый результат (и после возвращения на страницу)
+try:
+    _qp = st.query_params.get("job")
+except Exception:
+    _qp = None
+_job = st.session_state.get("job") or (_qp if isinstance(_qp, str) else None)
+if _job and st.session_state.get("job_loaded") != _job:
+    _js = jobs.status(_job)
+
+    def _forget_job():
+        st.session_state.job = None
+        try:
+            del st.query_params["job"]
+        except Exception:
+            pass
+    if _js is None:
+        st.info("Прежняя оркестровка уже не хранится на сервере (прошло больше 6 часов или сервер перезапускался). "
+                "Загрузите файл и запустите ещё раз.")
+        _forget_job()
+    elif _js.get("state") == "done":
+        try:
+            st.session_state.result = jobs.load(_job)
+            st.session_state.job_loaded = _job
+        except Exception:
+            st.error("Готовый результат не удалось прочитать. Запустите оркестровку ещё раз.")
+            with st.expander("Подробности для разработчика"):
+                st.code(traceback.format_exc())
+            _forget_job()
+    elif _js.get("state") == "error":
+        st.error("Не удалось обработать файл. Проверьте, что это сольная фортепианная пьеса в MIDI с ровным ритмом.")
+        with st.expander("Подробности для разработчика"):
+            st.code(_js.get("error", ""))
+        _forget_job()
+    elif not jobs.alive(_job):
+        st.warning("Оркестровка прервалась: сервер перезапускался во время работы. Запустите её ещё раз.")
+        _forget_job()
+    else:
+        _steps = [tuple(x) for x in _js.get("steps", [])]
+        _keys = [k for k, _ in _steps]
+        _i = _keys.index(_js.get("step")) if _js.get("step") in _keys else 0
+        _dur = float(_js.get("dur") or 60.0)
+        _est = [progress.estimate(k, _dur) for k in _keys]
+        _left = max(0.0, sum(_est[_i:]) - (time.time() - float(_js.get("step_started", time.time()))))
+        st.markdown(theme.SECTION("III", "Результат"), unsafe_allow_html=True)
+        st.progress(min(sum(_est[:_i]) / (sum(_est) or 1.0), 0.99),
+                    text="Шаг %d из %d: %s" % (_i + 1, len(_steps), _steps[_i][1] if _steps else ""))
+        try:
+            import streamlit.components.v1 as _cmp
+            _cmp.html(progress._countdown_html(_left), height=52)
+        except Exception:
+            st.caption("Осталось примерно %s" % progress._clock(_left))
+        st.info("Оркестровка идёт на сервере. Можно погасить экран или переключиться в другое приложение: "
+                "когда вернётесь, страница сама покажет результат.")
+        time.sleep(3)
+        st.rerun()
 
 res = st.session_state.result
 if res and res.get("mode") == "review":

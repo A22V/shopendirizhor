@@ -190,6 +190,24 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("лёгкие ударные FAIL (исключение)"); traceback.print_exc(); failed += 1
+# фоновые задания (web/jobs.py): работа идёт без страницы, повторный запуск того же задания не считается заново
+try:
+    sys.path.insert(0, os.path.join(ROOT, "web"))
+    import jobs, time as _time
+    _k = jobs.key(b"smoke", {"t": _time.time()})
+    _calls = []
+    def _fn(p, w):
+        p.go("plan"); _calls.append(w); return {"ok": 42}
+    jobs.start(_k, _fn, [("plan", "план")], 10.0)
+    for _ in range(50):
+        if (jobs.status(_k) or {}).get("state") == "done": break
+        _time.sleep(0.1)
+    _again = jobs.start(_k, _fn, [("plan", "план")], 10.0)
+    ok = jobs.load(_k) == {"ok": 42} and not _again and len(_calls) == 1
+    print("%-30s %s" % ("фоновые задания", "OK " if ok else "FAIL"))
+    failed += 0 if ok else 1
+except Exception:
+    print("фоновые задания FAIL (исключение)"); traceback.print_exc(); failed += 1
 # ноты с пометками (нужен verovio; без него проверка пропускается)
 try:
     import score_notation
