@@ -50,6 +50,9 @@ def _from_job():
         return None
 
 
+# Банк звуков: выбирается до загрузки файла (хранится в браузере, см. web/player_html.py)
+components.html(player_html.bank_panel(), height=170)
+
 src = _from_job()
 up = st.file_uploader("Открыть файл: многодорожечный MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl)",
                       key="player_file")
@@ -86,4 +89,4 @@ with st.expander("Как распознаны инструменты (%d)" % len
                "Если что-то распознано неверно, напишите, какая дорожка: поправлю таблицу.")
 components.html(player_html.build(prep), height=1150, scrolling=True)
 st.caption("Банк звуков по умолчанию — MS Basic (банк MuseScore 4, лицензия MIT): около 50 МБ, загружается "
-           "один раз и хранится в браузере. Свой банк можно выбрать в разделе «Банк звуков» над нотами.")
+           "один раз и хранится в браузере. Свой банк выбирается в окошке «Банк звуков» вверху страницы.")

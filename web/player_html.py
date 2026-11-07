@@ -69,15 +69,6 @@ details{margin-top:6px;font-size:14px}
   <div id="status">Нажмите «Играть»: загрузится банк звуков.</div>
   <div id="prog"><div></div></div>
   <div id="parts"></div>
-  <details><summary>Банк звуков</summary>
-    <div class="small" id="bankinfo"></div>
-    <div class="row" style="margin-top:6px">
-      <label><button type="button" onclick="document.getElementById('bankfile').click()">Выбрать свой банк (.sf2, .sf3, .dls)</button>
-      <input id="bankfile" type="file" style="display:none"></label>
-      <button id="bankdef" type="button">Вернуть банк по умолчанию</button>
-    </div>
-    <div class="small">Свой банк запоминается в этом браузере. Большие банки (сотни МБ) грузятся дольше и требуют больше памяти телефона.</div>
-  </details>
 </div>
 <div id="score"><!--SVG--></div>
 <script>
@@ -147,7 +138,6 @@ async function getBank() {
   await idbPut("default:" + D.bankUrl, buf);
   P.bank = D.bankName; return buf;
 }
-function bankInfo() { $("bankinfo").textContent = "Сейчас: " + (P.bank || "ещё не загружен") + "."; }
 
 // ---------- запуск ----------
 async function start() {
@@ -158,7 +148,7 @@ async function start() {
     st("Запускаю синтезатор…");
     await new Promise((ok, bad) => { const s = document.createElement("script"); s.src = blobUrl("LIB_B64", "text/javascript"); s.onload = ok; s.onerror = () => bad(new Error("движок не загрузился")); document.head.append(s); });
     await P.ctx.audioWorklet.addModule(blobUrl("PROC_B64", "text/javascript"));
-    const bank = await getBank(); bankInfo();
+    const bank = await getBank();
     st("Читаю банк звуков…");
     P.synth = new Spessa.WorkletSynthesizer(P.ctx);
     P.synth.connect(P.ctx.destination);
@@ -185,14 +175,6 @@ $("play").onclick = async () => {
 $("stop").onclick = () => { if (!P.seq) return; P.seq.pause(); P.seq.currentTime = 0; resetCursor(); };
 $("seek").oninput = () => { if (!P.seq) return; P.seq.currentTime = $("seek").value / 1000 * D.length; resetCursor(); };
 $("rate").onchange = () => { if (P.seq) P.seq.playbackRate = +$("rate").value; };
-$("bankfile").onchange = async ev => {
-  const f = ev.target.files[0]; if (!f) return;
-  st("Запоминаю банк «" + f.name + "» (" + (f.size / 1048576).toFixed(0) + " МБ)…");
-  await idbPut("own", { name: f.name, data: await f.arrayBuffer() });
-  st("Банк «" + f.name + "» сохранён. Страница перезапустит звук."); setTimeout(() => location.reload(), 600);
-};
-$("bankdef").onclick = async () => { await idbDel("own"); st("Вернул банк по умолчанию. Перезапуск…"); setTimeout(() => location.reload(), 400); };
-
 // ---------- указатель по нотам ----------
 const TM = D.timemap; let idx = -1, active = new Set(), lastScroll = 0;
 function secToQ(sec) {
@@ -228,6 +210,53 @@ function tick() {
 renderParts();
 $("time").textContent = "0:00 / " + fmt(D.length);
 $("play").disabled = false;
-idbGet("own").then(o => { P.bank = o ? "свой: " + o.name : ""; bankInfo(); if (!o) $("bankinfo").textContent = "По умолчанию: " + D.bankName + " (около 50 МБ, грузится один раз)."; });
 if (D.notes && D.notes.length) $("status").textContent += " " + D.notes.join(" ");
 </script></body></html>"""
+
+
+BANK_PANEL = r"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{margin:0;font-family:Georgia,"Times New Roman",serif;color:#2a1c12;background:transparent}
+.box{border:1px solid #b8892b;border-radius:10px;background:#fffdf7;padding:10px 12px}
+.t{font-weight:bold;font-size:15px}
+.s{font-size:14px;margin:6px 0;color:#2a1c12}
+.small{font-size:12px;color:#6b5a46}
+button{font:inherit;font-size:15px;border:1px solid #b8892b;background:#fff;border-radius:8px;padding:7px 11px;color:#2a1c12;margin-right:6px}
+</style></head><body>
+<div class="box">
+  <div class="t">Банк звуков</div>
+  <div class="s" id="cur">проверяю…</div>
+  <button type="button" id="pick">Выбрать свой банк (.sf2, .sf3, .dls)</button><button type="button" id="def">Вернуть по умолчанию</button>
+  <input id="file" type="file" accept=".sf2,.sf3,.dls,.sf" style="display:none">
+  <div class="small" id="msg">Банк запоминается в этом браузере. Выберите его до открытия нот: звук пойдёт этим банком. Если нот уже открыты, обновите страницу.</div>
+</div>
+<script>
+const DEFAULT_NAME = "__BANK_NAME__";
+const $ = id => document.getElementById(id);
+function idb() { return new Promise((ok, bad) => { const r = indexedDB.open("orkestrator_player", 1);
+  r.onupgradeneeded = () => r.result.createObjectStore("banks"); r.onsuccess = () => ok(r.result); r.onerror = () => bad(r.error); }); }
+async function idbGet(k) { try { const db = await idb(); return await new Promise(ok => { const q = db.transaction("banks").objectStore("banks").get(k); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); }); } catch (e) { return null; } }
+async function idbPut(k, v) { const db = await idb(); await new Promise((ok, bad) => { const t = db.transaction("banks", "readwrite"); t.objectStore("banks").put(v, k); t.oncomplete = ok; t.onerror = () => bad(t.error); }); }
+async function idbDel(k) { try { const db = await idb(); await new Promise(ok => { const t = db.transaction("banks", "readwrite"); t.objectStore("banks").delete(k); t.oncomplete = ok; t.onerror = ok; }); } catch (e) {} }
+async function show() {
+  let own = null; try { own = await idbGet("own"); } catch (e) {}
+  $("cur").textContent = own && own.name ? "Сейчас: свой банк «" + own.name + "»"
+                                        : "Сейчас: " + DEFAULT_NAME + " (по умолчанию, около 50 МБ, грузится при первом «Играть»)";
+}
+$("pick").onclick = () => $("file").click();
+$("file").onchange = async ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  $("msg").textContent = "Сохраняю банк «" + f.name + "» (" + (f.size / 1048576).toFixed(0) + " МБ)…";
+  try { await idbPut("own", { name: f.name, data: await f.arrayBuffer() }); await show();
+    $("msg").textContent = "Готово. Теперь откройте ноты: звук пойдёт этим банком. Если ноты уже открыты, обновите страницу.";
+  } catch (e) { $("msg").textContent = "Не удалось сохранить банк: " + (e && e.message ? e.message : e) + ". Попробуйте банк поменьше."; }
+};
+$("def").onclick = async () => { await idbDel("own"); await show(); $("msg").textContent = "Вернул банк по умолчанию. Обновите страницу, если ноты уже открыты."; };
+show();
+</script></body></html>"""
+
+
+def bank_panel():
+    """Панель выбора банка: показывается над загрузкой файла, работает без нот (2026-11-08)."""
+    return BANK_PANEL.replace("__BANK_NAME__", DEFAULT_BANK_NAME)
