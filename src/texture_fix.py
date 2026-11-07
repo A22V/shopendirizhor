@@ -207,3 +207,79 @@ def fill_winds(plan):
             ph[role] = list(ph[role]) + [[w, 0, None, None]]
             changes.append("такты %d–%d: %s добавлен(а) к голосу %s" % (ph["bars"][0], ph["bars"][1], WIND_RU[w], role))
     return plan, changes
+
+
+# ---------------------------------------------------------------------------
+# Солирующий инструмент на выбор (2026-11-07, по просьбе пользователя; выбирается при каждой оркестровке,
+# по умолчанию «нет» — тогда план не меняется). Не правило для всех пьес, а режим, как в концерте:
+# один инструмент ведёт мелодию от начала до конца, остальные аккомпанируют.
+#   * Флейта, кларнет, гобой, скрипка, виолончель: во всех фразах мелодию играет только солист; другие инструменты
+#     из мелодии убираются (их другие роли остаются), сам солист из сопровождения убирается.
+#     Октава выбирается для всей фразы целиком (а не нота за нотой), чтобы не ломать линию: сначала как можно
+#     меньше нот вне диапазона, затем для флейты — самая низкая подходящая октава («нежная и невысокая», пожелание
+#     пользователя), для остальных — ближайшая к написанной.
+#   * Фортепиано: играет свою пьесу целиком (обе руки, как в оригинале); оркестр не дублирует мелодию и бегущее
+#     сопровождение (их играет рояль), остаются выдержанные голоса и бас.
+# Статус: эвристика (смысл «солист и аккомпанемент» — концертная практика; правила выбора октавы наши).
+# ---------------------------------------------------------------------------
+SOLO_CHOICES = {"Flute": "флейта", "Clarinet": "кларнет", "Oboe": "гобой", "Violin I": "скрипка I",
+                "Cello": "виолончель", "Piano": "фортепиано"}
+FLUTE_SOFT_TOP = 84      # C6; эвристика: выше флейта звучит ярко и резко (ср. ORCH_COMFORT, порог G#5 для дубля)
+_SOLO_RANGE_KEY = {"Flute": "flute", "Clarinet": "clarinet", "Oboe": "oboe", "Violin I": "violin", "Cello": "cello"}
+
+
+def _solo_shift(pitches, name, ranges):
+    lo, hi = ranges[_SOLO_RANGE_KEY[name]]
+    best = None
+    for sh in (-24, -12, 0, 12, 24):
+        out = sum(1 for p in pitches if not lo <= p + sh <= hi)
+        if name == "Flute":   # «нежная и невысокая»: ноты выше C6 считаются так же плохо, как ноты вне диапазона
+            key = (out + sum(1 for p in pitches if p + sh > FLUTE_SOFT_TOP), sh)
+        else:
+            key = (out, (abs(sh), sh))
+        if best is None or key < best[0]:
+            best = (key, sh)
+    return best[1]
+
+
+def apply_solo(plan, solo, melody, bars):
+    """Возвращает (новый_план, изменения, piano_mode). solo: None/"" — ничего не меняется.
+    melody: ноты мелодии из анализа ({"offset","pitch"}); bars: [(начало, длина)] тактов в долях."""
+    if not solo:
+        return plan, [], "off"
+    plan = copy.deepcopy(plan)
+    changes = []
+    import validator
+    ranges = validator.RANGES_UNVERIFIED
+    starts = [b[0] for b in bars]
+    for ph in plan.get("phrases", []):
+        if solo == "Piano":
+            ph["_was_melody"] = [sp[0] for sp in ph.get("melody", [])] + [sp[0] for sp in ph.get("figuration", []) or []]
+            ph["melody"], ph["figuration"] = [], []
+            continue
+        a, b = ph["bars"]
+        t0 = starts[a - 1] if a - 1 < len(starts) else 0.0
+        t1 = starts[b] if b < len(starts) else float("inf")
+        pitches = [m["pitch"] for m in melody if t0 - 1e-9 <= m["offset"] < t1 - 1e-9]
+        sh = _solo_shift(pitches, solo, ranges) if pitches else 0
+        for role in ("inner1", "inner2", "bass", "figuration"):
+            if ph.get(role):
+                ph[role] = [s for s in ph[role] if s[0] != solo]
+        was = [sp[0] for sp in ph.get("melody", []) if sp[0] != solo]
+        ph["melody"] = [[solo, sh, None, None]]
+        ph["_was_melody"] = was
+    # кто играл только мелодию, остался бы без нот: такой струнный удваивает первый внутренний голос там,
+    # где раньше играл мелодию (новых нот нет); духовых добавляет ORCH_WINDS, если он включён
+    used = {sp[0] for ph in plan["phrases"] for r in ("melody", "inner1", "inner2", "bass", "figuration")
+            for sp in ph.get(r, []) or []}
+    for ph in plan["phrases"]:
+        for who in ph.pop("_was_melody", []):
+            if who not in used and who in ("Violin I", "Violin II", "Viola", "Cello") and ph.get("inner1") is not None:
+                ph["inner1"] = list(ph.get("inner1") or []) + [[who, 0, None, None]]
+                changes.append("такты %d–%d: %s удваивает внутренний голос" % (ph["bars"][0], ph["bars"][1], who))
+    if solo == "Piano":
+        changes.append("солирует фортепиано: рояль играет пьесу целиком, оркестр без мелодии и бегущего сопровождения")
+        return plan, changes, "solo"
+    changes.append("солирует %s: мелодия во всех фразах только у солиста; октава выбрана для каждой фразы целиком"
+                   % SOLO_CHOICES[solo])
+    return plan, changes, "off"

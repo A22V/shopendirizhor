@@ -209,7 +209,7 @@ def validator_feedback(issues, meta):
     return lines
 
 
-def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_model, max_rounds=3):
+def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_model, max_rounds=3, solo=None):
     """Model writes the plan, the orchestrator builds it, the validator checks it, and the model gets the
     validator's findings to fix. Keeps the best attempt. Returns (run_log, issues, names, attempts, plan_path)."""
     import orchestrator as o
@@ -233,7 +233,7 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
         plan_path = stem + "_llm_plan.json"
         with open(plan_path, "w", encoding="utf-8") as f:
             json.dump(plan, f, ensure_ascii=False, indent=1)
-        log, issues, names = o.run(in_path, stem, "off", plan_path)
+        log, issues, names = o.run(in_path, stem, "off", plan_path, solo=solo)
         errors = [i for i in issues if i[0] == "error"]
         silent = [] if CZERNY else [i for i in issues if i[1] == "QX06"]
         score = 10 * len(errors) + 2 * len(silent) + sum(1 for i in issues if i[0] == "warning")
@@ -251,7 +251,7 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
                  "keep each instrument in its range, answer with JSON only."))
     if best is None:
         raise RuntimeError("planner produced no valid plan: %s" % attempts[-1])
-    log, issues, names = o.run(in_path, out_stem, "off", best["plan_path"])
+    log, issues, names = o.run(in_path, out_stem, "off", best["plan_path"], solo=solo)
     return log, issues, names, attempts, best["plan_path"]
 
 

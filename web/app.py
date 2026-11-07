@@ -161,6 +161,14 @@ REVIEW_MODE = "Проверить партитуру (готовый оркес�
 PIANO_REVIEW_MODE = "Проверить переложение (готовое фортепиано)"
 mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", "Переложение для фортепиано (из оркестра)", REVIEW_MODE,
                                 PIANO_REVIEW_MODE], key="mode_pick")
+SOLO_OPTIONS = {"Нет (оркестр сам распределяет мелодию)": None, "Фортепиано": "Piano", "Флейта (нежная, невысокая)": "Flute",
+                "Кларнет": "Clarinet", "Гобой": "Oboe", "Скрипка": "Violin I", "Виолончель": "Cello"}
+solo = None
+if mode == "Оркестровка (из фортепиано)":
+    solo = SOLO_OPTIONS[st.selectbox(
+        "Солирующий инструмент", list(SOLO_OPTIONS), key="solo_pick",
+        help="Как в концерте: один инструмент ведёт мелодию от начала до конца, остальные аккомпанируют. "
+             "Фортепиано играет пьесу целиком, оркестр его поддерживает. Выбирается для каждой пьесы отдельно.")]
 orig_up = None
 if mode == PIANO_REVIEW_MODE:
     st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
@@ -172,7 +180,7 @@ go = st.button({"Оркестровка (из фортепиано)": "Созд�
                disabled=up is None, use_container_width=True)
 
 
-def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None):
+def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=None):
     """Runs the full pipeline in a private temporary folder and returns the list of result files.
     prog: progress.Steps (шаги llm/plan, mp3, review, notes) или None."""
     step = (lambda k: prog.go(k)) if prog else (lambda k: None)
@@ -187,13 +195,13 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None):
     if use_llm_flag:
         llm_planner.MODELS_SERVED.clear()
         log, issues, names, llm_log, _pp = llm_planner.orchestrate_with_llm(
-            src, stem, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY)
+            src, stem, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY, solo=solo)
         plan = json.load(open(_pp, encoding="utf-8"))
         planner_info = {"provider": PROVIDER, "model_requested": PROVIDER_MODEL,
                         "model_served_by_api": sorted(set(llm_planner.MODELS_SERVED)),
                         "requests": len(llm_planner.MODELS_SERVED)}
     else:
-        log, issues, names = orchestrator.run(src, stem, "off", None)
+        log, issues, names = orchestrator.run(src, stem, "off", None, solo=solo)
         plan = json.load(open(stem + "_plan.json", encoding="utf-8"))
     report = json.load(open(stem + "_report.json", encoding="utf-8"))
     if planner_info:                                  # в отчёт: какая модель писала план (видно и в ZIP)
@@ -397,7 +405,7 @@ elif go and up is not None:
                                 ("notes", "ноты с пометками")], progress.midi_seconds(up.getvalue()))
         with st.spinner("Оркестровка выполняется..."):
             try:
-                st.session_state.result = process(up.getvalue(), up.name, use_llm_flag=use_llm, prog=_prog)
+                st.session_state.result = process(up.getvalue(), up.name, use_llm_flag=use_llm, prog=_prog, solo=solo)
             except Exception as e:
                 _prog.abort()
                 st.session_state.result = None
@@ -535,6 +543,9 @@ if res:
     issues = res["issues"]
     errors = [i for i in issues if i[0] == "error"]
     warns = [i for i in issues if i[0] == "warning"]
+    _solo = (((res.get("report") or {}).get("plan_log") or {}).get("solo") or {})
+    if _solo.get("instrument"):
+        st.info("Солирует: %s." % {v: k for k, v in SOLO_OPTIONS.items()}.get(_solo["instrument"], _solo["instrument"]))
     show_gate(res.get("gate"))
     if errors:
         st.error("Найдены серьёзные ошибки: %d. Результат не рекомендуется использовать." % len(errors))
