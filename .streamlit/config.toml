@@ -6,3 +6,7 @@ backgroundColor = "#fcf8ef"
 secondaryBackgroundColor = "#f5ecd7"
 textColor = "#2a1c12"
 font = "serif"
+
+# Боковое меню страниц не показываем: в проигрыватель ведут ссылки на главной странице (2026-11-08).
+[client]
+showSidebarNavigation = false

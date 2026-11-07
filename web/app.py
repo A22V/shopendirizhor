@@ -67,6 +67,10 @@ with st.expander("Ограничения и приватность", expanded=Fa
 if "result" not in st.session_state:
     st.session_state.result = None
 
+st.markdown("🎼 Есть готовая партитура (MIDI или MusicXML)? [**Партитурный проигрыватель** (новая вкладка)](Проигрыватель): "
+            "ноты по станам, звук банком MuseScore, можно выключать инструменты.")
+st.page_link("pages/1_Проигрыватель.py", label="Открыть проигрыватель в этой вкладке", icon="🎼")
+
 st.markdown(theme.SECTION("I", "Загрузите пьесу"), unsafe_allow_html=True)
 # Без фильтра type: на планшетах (iPad, Android) браузер с фильтром ".mid" часто делает MIDI-файлы серыми
 # и их нельзя выбрать. Расширение проверяем сами.
@@ -649,6 +653,11 @@ if res and res.get("mode") == "reduction":
     res = None
 if res:
     st.markdown(theme.SECTION("III", "Результат"), unsafe_allow_html=True)
+    # Партитурный проигрыватель (web/pages/1_Проигрыватель.py): ноты по станам и звук в браузере
+    _pj = st.session_state.get("job")
+    if _pj:
+        st.markdown("🎼 [**Открыть в партитурном проигрывателе** (новая вкладка)](Проигрыватель?job=%s)" % _pj)
+        st.page_link("pages/1_Проигрыватель.py", label="…или открыть проигрыватель в этой вкладке", icon="🎼")
     if res["mp3"]:
         st.audio(res["mp3"], format="audio/mpeg")
         _sf = os.path.basename(audio_tools.LAST_SOUNDFONT or "")

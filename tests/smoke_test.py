@@ -234,6 +234,28 @@ try:
         print("%-30s пропущено (verovio не установлен)" % "ноты с пометками")
 except Exception:
     print("ноты с пометками FAIL (исключение)"); traceback.print_exc(); failed += 1
+# партитурный проигрыватель: распознавание инструментов, порядок станов, ноты, карта времени, страница
+try:
+    import score_player
+    sys.path.insert(0, os.path.join(ROOT, "web"))
+    import player_html
+    names = {n: score_player.identify(n)[1] for n in ("Violin I", "Violoncello", "Contrabass", "Horn in F", "Fl.")}
+    ok = names == {"Violin I": "Скрипка", "Violoncello": "Виолончель", "Contrabass": "Контрабас",
+                   "Horn in F": "Валторна", "Fl.": "Флейта"} and score_player.identify("", 71)[1] == "Кларнет"
+    _src = os.path.join(outdir, "k545_piano_excerpt.mid")      # оркестровка из первого блока теста
+    _pp = score_player.prepare(open(_src, "rb").read(), "t.mid")
+    labels = [p["label"] for p in _pp["parts"]]
+    _ord = [score_player.identify(p["source"])[2] for p in _pp["parts"]]
+    ok = ok and _ord == sorted(_ord) and len(labels) >= 3                       # станы в порядке партитуры
+    ok = ok and len(set(c for p in _pp["parts"] for c in p["channels"])) == len(_pp["parts"])    # у каждого свой канал
+    ok = ok and _pp["pages"] and len(_pp["timemap"]) > 10 and _pp["tempo"][0][0] == 0
+    _h = player_html.build(_pp)
+    ok = ok and "WorkletSynthesizer" not in _h[:2000] and "LIB_B64" not in _h and "/*DATA*/" not in _h
+    print("%-30s %s  станов=%d событий=%d страница=%d КБ" % ("партитурный проигрыватель", "OK " if ok else "FAIL",
+          len(_pp["parts"]), len(_pp["timemap"]), len(_h) // 1024))
+    failed += 0 if ok else 1
+except Exception:
+    print("партитурный проигрыватель FAIL (исключение)"); traceback.print_exc(); failed += 1
 # замер ресурсов сервера (только числа в отчёт, звук не меняет)
 try:
     import resources
