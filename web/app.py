@@ -21,6 +21,7 @@ import audio_tools           # noqa: E402
 import llm_planner           # noqa: E402
 import reduction             # noqa: E402
 import score_review          # noqa: E402
+import score_fix             # noqa: E402
 import score_notation        # noqa: E402
 import piano_review          # noqa: E402
 PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
@@ -283,7 +284,7 @@ if go and up is not None and mode == REVIEW_MODE:
                 _prog.go("notes")
                 score_notation.build(_rv, None, _src)
                 _prog.finish()
-                st.session_state.result = {"mode": "review", "review": _rv, "name": os.path.splitext(up.name)[0]}
+                st.session_state.result = {"mode": "review", "review": _rv, "name": os.path.splitext(up.name)[0], "src": _src}
             except Exception:
                 _prog.abort()
                 st.session_state.result = None
@@ -381,6 +382,47 @@ if res and res.get("mode") == "review":
     st.download_button("Скачать карту замечаний (HTML, открывается в браузере)",
                        score_review.map_html(res["review"], standalone=True).encode("utf-8"),
                        file_name=res["name"] + "_карта_замечаний.html", mime="text/html", use_container_width=True)
+    # Исправление быстрых нот (K2): одобрено на слух 2026-11-07. Исходный файл не меняется: получается отдельный MIDI.
+    st.markdown(theme.SECTION("IV", "Исправление"), unsafe_allow_html=True)
+    st.caption("Кнопка делает НОВЫЙ файл: у валторны, фагота и контрабаса в долях с быстрыми нотами остаётся одна опорная нота. "
+               "Высоты не меняются. Ваш исходный файл остаётся как был, так что вернуться к нему можно всегда.")
+    if st.button("Исправить быстрые ноты (валторна, фагот, контрабас)", key="fix_go", use_container_width=True):
+        try:
+            _fx = os.path.join(os.path.dirname(res["src"]), "score_fixed.mid")
+            _chg = score_fix.fix_midi(res["src"], _fx)
+            _rv2 = score_review.review(_fx)
+            _mp3f = None
+            try:
+                _mp3f = audio_tools.render_mp3(_fx, os.path.join(os.path.dirname(res["src"]), "score_fixed.mp3"))
+            except Exception:
+                _mp3f = None
+            res["fix"] = {"midi": _fx, "changes": _chg, "mp3": _mp3f if _mp3f and os.path.exists(_mp3f) else None,
+                          "before": len(res["review"]["findings"]), "after": len(_rv2["findings"])}
+            st.session_state.result = res
+        except Exception:
+            res.pop("fix", None)
+            st.error("Не удалось исправить файл. Исходный файл не изменён.")
+            with st.expander("Подробности для разработчика"):
+                st.code(traceback.format_exc())
+    _fix = res.get("fix")
+    if _fix:
+        if _fix["changes"]:
+            st.success("Что изменено:")
+            for _c in _fix["changes"]:
+                st.write("• " + _c)
+        else:
+            st.info("Исправлять нечего: быстрых нот у валторны, фагота и контрабаса не найдено.")
+        st.write("Замечаний рецензента: было %d, стало %d." % (_fix["before"], _fix["after"]))
+        if _fix["mp3"]:
+            st.audio(_fix["mp3"])
+            st.caption("Звук: " + str(getattr(audio_tools, "LAST_SOUNDFONT", "") or "банк по умолчанию"))
+        with open(_fix["midi"], "rb") as _fh:
+            st.download_button("Скачать исправленный MIDI", _fh.read(), file_name=res["name"] + "_исправлено.mid",
+                               mime="audio/midi", use_container_width=True, key="dl_fixed_mid")
+        if _fix["mp3"]:
+            with open(_fix["mp3"], "rb") as _fh:
+                st.download_button("Скачать исправленный MP3", _fh.read(), file_name=res["name"] + "_исправлено.mp3",
+                                   mime="audio/mpeg", use_container_width=True, key="dl_fixed_mp3")
     res = None
 if res and res.get("mode") == "piano_review":
     st.markdown(theme.SECTION("III", "Проверка переложения"), unsafe_allow_html=True)
