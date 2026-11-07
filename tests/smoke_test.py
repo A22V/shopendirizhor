@@ -208,6 +208,19 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("фоновые задания FAIL (исключение)"); traceback.print_exc(); failed += 1
+# исправление «пустого низа» (score_fix.fix_low, K4): тактов без нот ниже C3 становится меньше, чужих нот нет
+try:
+    import score_fix, quality_gate
+    _src = os.path.join(ROOT, "input", "k545_piano_excerpt.mid")
+    _o = os.path.join(outdir, "low_src"); orchestrator.run(_src, _o)
+    _cnt = lambda f: sum(len(x[3].split(",")) for x in score_review.review(f)["findings"] if x[1] == "K4")
+    _ch = score_fix.fix_low(_o + ".mid", _o + "_fixlow.mid")
+    ok = (quality_gate.check(_src, _o + "_fixlow.mid")["stats"]["foreign"]["bad"] == 0
+          and (not _ch or _cnt(_o + "_fixlow.mid") <= _cnt(_o + ".mid")))
+    print("%-30s %s  %s" % ("исправление низа (K4)", "OK " if ok else "FAIL", _ch[:1]))
+    failed += 0 if ok else 1
+except Exception:
+    print("исправление низа (K4) FAIL (исключение)"); traceback.print_exc(); failed += 1
 # ноты с пометками (нужен verovio; без него проверка пропускается)
 try:
     import score_notation

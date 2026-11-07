@@ -254,6 +254,85 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=
             "mp3": mp3, "name": os.path.splitext(name)[0], "review": review, "gate": gate}
 
 
+FIX_NO_AUTO = {   # замечания без автоисправления: почему (простыми словами)
+    "K1": "ноты вне удобного диапазона: исправлять надо выбором другого инструмента — это делает план, а не готовый файл",
+    "K3": "«стена звука» и скачки состава: прореживание включается до расстановки нот (ORCH_THIN), в готовом файле его нет",
+    "K5": "первая скрипка молчит: так бывает задумано (мелодия у других), решает слушатель",
+    "HM05": "параллельные октавы: нужна переделка голосов, автоматически пока не умеем",
+    "HM32": "параллельные квинты: нужна переделка голосов, автоматически пока не умеем",
+    "QX04": "длинные ноты духовых без передышки: решается в плане",
+    "QX05": "много унисонных удвоений: решается в плане",
+    "QX06": "инструмент не играет: в оркестровке это исправляют защиты плана (ORCH_BASS, ORCH_WINDS)",
+}
+
+
+def show_fix(res, src_midi, key):
+    """Раздел «Исправление»: для каждого замечания, у которого есть автоисправление, — кнопка. Каждая кнопка делает
+    НОВЫЙ файл (исходный не меняется) и даёт его послушать и скачать; рецензия пересчитывается."""
+    review = res.get("review") or {}
+    codes = [f[1] for f in review.get("findings", [])]
+    st.markdown(theme.SECTION("IV", "Исправление"), unsafe_allow_html=True)
+    if not codes:
+        st.caption("Замечаний нет — исправлять нечего.")
+        return
+    fixable = [c for c in score_fix.FIXES if c in codes]
+    st.caption("Каждая кнопка делает НОВЫЙ файл; ваш исходный остаётся как был. Сначала послушайте исправленный вариант, "
+               "потом решайте, какой оставить.")
+    if not fixable:
+        st.info("Для найденных замечаний автоматического исправления пока нет.")
+    for code in fixable:
+        label, fn, approved = score_fix.FIXES[code]
+        st.markdown("**[%s]** %s%s" % (code, label, "" if approved else " — не проверено на слух, это проба"))
+        if st.button("Исправить [%s]" % code, key="fix_%s_%s" % (key, code), use_container_width=True):
+            try:
+                base = os.path.splitext(src_midi)[0]
+                _fx = base + "_fix_%s.mid" % code
+                _chg = fn(src_midi, _fx)
+                _rv2 = score_review.review(_fx)
+                _mp3f = None
+                try:
+                    _mp3f = audio_tools.render_mp3(_fx, base + "_fix_%s.mp3" % code)
+                except Exception:
+                    _mp3f = None
+                res.setdefault("fixes", {})[code] = {
+                    "midi": _fx, "changes": _chg, "mp3": _mp3f if _mp3f and os.path.exists(_mp3f) else None,
+                    "before": len(review.get("findings", [])), "after": len(_rv2["findings"]),
+                    "left": [f[3] for f in _rv2["findings"] if f[1] == code]}
+                st.session_state.result = res
+            except Exception:
+                res.get("fixes", {}).pop(code, None)
+                st.error("Не удалось исправить файл. Исходный файл не изменён.")
+                with st.expander("Подробности для разработчика"):
+                    st.code(traceback.format_exc())
+        _fix = (res.get("fixes") or {}).get(code)
+        if _fix:
+            if _fix["changes"]:
+                st.success("Что изменено:")
+                for _c in _fix["changes"]:
+                    st.write("• " + _c)
+            else:
+                st.info("Исправлять нечего: подходящих мест не найдено.")
+            st.write("Замечаний рецензента: было %d, стало %d." % (_fix["before"], _fix["after"]))
+            for _l in _fix["left"]:
+                st.caption("Осталось: " + _l)
+            if _fix["mp3"]:
+                st.audio(_fix["mp3"])
+            with open(_fix["midi"], "rb") as _fh:
+                st.download_button("Скачать исправленный MIDI [%s]" % code, _fh.read(),
+                                   file_name=res["name"] + "_исправлено_%s.mid" % code, mime="audio/midi",
+                                   use_container_width=True, key="dl_fix_%s_%s" % (key, code))
+            if _fix["mp3"]:
+                with open(_fix["mp3"], "rb") as _fh:
+                    st.download_button("Скачать исправленный MP3 [%s]" % code, _fh.read(),
+                                       file_name=res["name"] + "_исправлено_%s.mp3" % code, mime="audio/mpeg",
+                                       use_container_width=True, key="dl_fixmp3_%s_%s" % (key, code))
+    other = sorted({c for c in codes if c not in score_fix.FIXES})
+    if other:
+        with st.expander("Почему остальные замечания не исправляются автоматически"):
+            for c in other:
+                st.write("**[%s]** %s" % (c, FIX_NO_AUTO.get(c, "автоисправления пока нет")))
+
+
 def show_gate(gate):
     """Контроль брака (src/quality_gate.py): объективные ошибки по сравнению с оригиналом. Ошибку не прячет."""
     st.markdown("#### Контроль брака")
@@ -491,47 +570,7 @@ if res and res.get("mode") == "review":
     st.download_button("Скачать карту замечаний (HTML, открывается в браузере)",
                        score_review.map_html(res["review"], standalone=True).encode("utf-8"),
                        file_name=res["name"] + "_карта_замечаний.html", mime="text/html", use_container_width=True)
-    # Исправление быстрых нот (K2): одобрено на слух 2026-11-07. Исходный файл не меняется: получается отдельный MIDI.
-    st.markdown(theme.SECTION("IV", "Исправление"), unsafe_allow_html=True)
-    st.caption("Кнопка делает НОВЫЙ файл: у валторны, фагота и контрабаса в долях с быстрыми нотами остаётся одна опорная нота. "
-               "Высоты не меняются. Ваш исходный файл остаётся как был, так что вернуться к нему можно всегда.")
-    if st.button("Исправить быстрые ноты (валторна, фагот, контрабас)", key="fix_go", use_container_width=True):
-        try:
-            _fx = os.path.join(os.path.dirname(res["src"]), "score_fixed.mid")
-            _chg = score_fix.fix_midi(res["src"], _fx)
-            _rv2 = score_review.review(_fx)
-            _mp3f = None
-            try:
-                _mp3f = audio_tools.render_mp3(_fx, os.path.join(os.path.dirname(res["src"]), "score_fixed.mp3"))
-            except Exception:
-                _mp3f = None
-            res["fix"] = {"midi": _fx, "changes": _chg, "mp3": _mp3f if _mp3f and os.path.exists(_mp3f) else None,
-                          "before": len(res["review"]["findings"]), "after": len(_rv2["findings"])}
-            st.session_state.result = res
-        except Exception:
-            res.pop("fix", None)
-            st.error("Не удалось исправить файл. Исходный файл не изменён.")
-            with st.expander("Подробности для разработчика"):
-                st.code(traceback.format_exc())
-    _fix = res.get("fix")
-    if _fix:
-        if _fix["changes"]:
-            st.success("Что изменено:")
-            for _c in _fix["changes"]:
-                st.write("• " + _c)
-        else:
-            st.info("Исправлять нечего: быстрых нот у валторны, фагота и контрабаса не найдено.")
-        st.write("Замечаний рецензента: было %d, стало %d." % (_fix["before"], _fix["after"]))
-        if _fix["mp3"]:
-            st.audio(_fix["mp3"])
-            st.caption("Звук: " + str(getattr(audio_tools, "LAST_SOUNDFONT", "") or "банк по умолчанию"))
-        with open(_fix["midi"], "rb") as _fh:
-            st.download_button("Скачать исправленный MIDI", _fh.read(), file_name=res["name"] + "_исправлено.mid",
-                               mime="audio/midi", use_container_width=True, key="dl_fixed_mid")
-        if _fix["mp3"]:
-            with open(_fix["mp3"], "rb") as _fh:
-                st.download_button("Скачать исправленный MP3", _fh.read(), file_name=res["name"] + "_исправлено.mp3",
-                                   mime="audio/mpeg", use_container_width=True, key="dl_fixed_mp3")
+    show_fix(res, res["src"], "review")
     res = None
 if res and res.get("mode") == "piano_review":
     st.markdown(theme.SECTION("III", "Проверка переложения"), unsafe_allow_html=True)
@@ -638,6 +677,9 @@ if res:
 
     with st.expander("Рецензия на партитуру (по-русски)", expanded=True):
         show_review(res.get("review"))
+
+    if res.get("review"):
+        show_fix(res, res["stem"] + ".mid", "orch")
 
     with st.expander("Технические замечания проверки (английские коды)"):
         if not issues:
