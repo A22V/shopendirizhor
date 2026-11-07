@@ -175,7 +175,23 @@ def _read_musicxml_text(data, name):
                 inner = m.group(1).decode() if m else None
             inner = inner or next(n for n in z.namelist() if n.endswith((".xml", ".musicxml")) and "META-INF" not in n)
             data = z.read(inner)
-    return data.decode("utf-8", errors="replace")
+    return decode_xml(data)
+
+
+def decode_xml(data):
+    """Текст MusicXML: убирает метку BOM (её ставят программы Windows, verovio на ней молча отказывает),
+    понимает UTF-16 и пишет в заголовке UTF-8."""
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        text = data.decode("utf-16", errors="replace")
+    elif data[:4] in (b"<\x00?\x00", b"\x00<\x00?"):
+        text = data.decode("utf-16-le" if data[:1] == b"<" else "utf-16-be", errors="replace")
+    else:
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = data.decode("cp1251", errors="replace") if b"1251" in data[:200] else data.decode("latin-1")
+    text = text.lstrip("﻿ \t\r\n")
+    return re.sub(r'(<\?xml[^>]*encoding=["\'])[^"\']*(["\'])', r"\1UTF-8\2", text, count=1)
 
 
 def is_musicxml(data, name=""):
@@ -296,7 +312,19 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
                    "pageMarginTop": 20, "pageMarginBottom": 20, "svgViewBox": True, "breaks": "auto",
                    "svgRemoveXlink": True})
     if not tk.loadData(notation_xml):
-        raise ValueError("verovio не смог прочитать ноты: %s" % (tk.getLog() or "")[-400:])
+        # запасной путь: music21 перезаписывает ноты своим MusicXML, который verovio читает
+        ok = False
+        try:
+            alt = os.path.join(work, "again.musicxml")
+            music21.converter.parseData(notation_xml, format="musicxml").write("musicxml", fp=alt)
+            ok = tk.loadData(open(alt, encoding="utf-8").read())
+            if ok:
+                notes.append("Ноты пришлось перезаписать (исходный MusicXML распознаватель не принял).")
+        except Exception:
+            ok = False
+        if not ok:
+            raise ValueError("verovio не смог прочитать ноты (начало файла: %r, размер %d байт): %s"
+                             % (notation_xml[:80], len(notation_xml), (tk.getLog() or "")[-300:]))
     pages = [tk.renderToSVG(i) for i in range(1, tk.getPageCount() + 1)]
     tm = tk.renderToTimemap({"includeMeasures": True, "includeRests": False})
     timemap = [{"q": e.get("qstamp", 0.0), "on": e.get("on", []), "off": e.get("off", []),

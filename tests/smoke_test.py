@@ -279,6 +279,12 @@ try:
     ok = ok and len(set(c for p in _pp["parts"] for c in p["channels"])) == len(_pp["parts"])    # у каждого свой канал
     ok = ok and _pp["pages"] and len(_pp["timemap"]) > 10 and _pp["tempo"][0][0] == 0
     ok = ok and _pp["meter"] and _pp["meter"][0][0] == 0                      # размер такта для метронома
+    # MusicXML с меткой BOM (так сохраняют программы Windows) и в UTF-16 должен открываться
+    import music21 as _m21
+    _xs = _m21.converter.parse(os.path.join(outdir, "k545_piano_excerpt.mid")).write("musicxml")
+    _xb = open(_xs, "rb").read()
+    for _v in (b"\xef\xbb\xbf" + _xb, _xb.decode("utf-8").encode("utf-16")):
+        ok = ok and bool(score_player.prepare(_v, "bom.musicxml")["pages"])
     _h = player_html.build(_pp)
     ok = ok and "WorkletSynthesizer" not in _h[:2000] and "LIB_B64" not in _h and "/*DATA*/" not in _h
     print("%-30s %s  станов=%d событий=%d страница=%d КБ" % ("партитурный проигрыватель", "OK " if ok else "FAIL",
