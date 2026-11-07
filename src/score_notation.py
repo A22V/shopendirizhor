@@ -106,8 +106,11 @@ def _hands_midi(res):
 
 
 def _midi_to_musicxml(midi_path):
-    import music21
-    sc = music21.converter.parse(midi_path)
+    import music21, shutil
+    # копия под коротким латинским именем: music21 и verovio на сервере могут не справиться с русским путём
+    tmp_in = os.path.join(tempfile.mkdtemp(prefix="midi_"), "input.mid")
+    shutil.copyfile(midi_path, tmp_in)
+    sc = music21.converter.parse(tmp_in)
     out = os.path.join(tempfile.mkdtemp(prefix="notation_"), "score.musicxml")
     sc.write("musicxml", fp=out)
     return out
@@ -125,8 +128,15 @@ def prepare(musicxml_path=None, midi_path=None, staff_names=None):
         musicxml_path = _midi_to_musicxml(midi_path)
     tk = verovio.toolkit()
     tk.setOptions(OPTIONS)
-    if not tk.loadFile(musicxml_path):
-        raise ValueError("verovio не смог прочитать MusicXML")
+    # Файл читаем сами и отдаём verovio текстом (loadData): так не зависим от того, как библиотека
+    # открывает путь на сервере. Если и так не вышло, в ошибке будет причина из самой библиотеки.
+    with open(musicxml_path, "rb") as fh:
+        raw = fh.read()
+    text = raw.decode("utf-8", errors="replace")
+    if not tk.loadData(text):
+        log = (tk.getLog() or "").strip()[-600:]
+        raise ValueError("verovio не смог прочитать MusicXML (размер %d байт; причина из verovio: %s)"
+                         % (len(raw), log or "не указана"))
     root = ET.fromstring(tk.getMEI())
     # номер нотного стана -> название инструмента, как в рецензии ("Скрипка I" и т. д.)
     staff_name, violins = {}, 0
