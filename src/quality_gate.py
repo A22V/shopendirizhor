@@ -34,7 +34,8 @@ TOL = 0.13                # допуск по времени, доли (кван
 
 RU = {"Flute": "Флейта", "Oboe": "Гобой", "Clarinet": "Кларнет", "Bassoon": "Фагот", "Horn": "Валторна",
       "Violin I": "Скрипка I", "Violin II": "Скрипка II", "Viola": "Альт", "Violoncello": "Виолончель",
-      "Cello": "Виолончель", "Contrabass": "Контрабас", "Double Bass": "Контрабас", "Piano": "Фортепиано"}
+      "Cello": "Виолончель", "Contrabass": "Контрабас", "Double Bass": "Контрабас", "Piano": "Фортепиано",
+      "Organ": "Орган", "Accordion": "Аккордеон", "Guitar": "Гитара"}
 
 
 def _notes(path):
@@ -102,7 +103,7 @@ def melody_of(piano_path):
     return [(m["offset"], m["offset"] + m["dur"], m["pitch"]) for m in mel]
 
 
-def check(piano_path, orch_path, melody=None):
+def check(piano_path, orch_path, melody=None, solo=False):
     """Возвращает {"ok": bool, "defects": [(код, текст, статус)], "warnings": [...], "stats": {...}}."""
     P, _, p_len, pedal, bpb = _notes(piano_path)
     P = _with_pedal(P, pedal)
@@ -175,9 +176,12 @@ def check(piano_path, orch_path, melody=None):
 
     # Б4 молчащие
     playing = {n for *_, n in O}
-    silent = [n for n in names if n not in playing and n in RU and n != "Piano"]
+    silent = [n for n in names if n not in playing and n in RU and n not in ("Piano", "Organ", "Accordion", "Guitar")]
     stats["silent"] = silent
-    if silent:
+    if silent and solo:      # с солистом молчащие в сопровождении — норма (Форсайт с. 197: «twelve stringed-instruments only»)
+        warnings.append(("П2", "С солистом молчат: %s." % ", ".join(RU.get(n, n) for n in silent),
+                         "так задумано: лёгкое сопровождение солиста"))
+    elif silent:
         defects.append(("Б4", "Не играют ни одной ноты: %s." % ", ".join(RU.get(n, n) for n in silent),
                         "измерение; брак по решению пользователя (нужен полный состав)"))
 

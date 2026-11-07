@@ -12,15 +12,25 @@ from music21 import converter, stream, note, chord, instrument, meter, dynamics,
 import validator
 
 RANGES = validator.RANGES_UNVERIFIED  # UNVERIFIED sounding ranges (MIDI)
+# Solo-only instruments (2026-11-07, chosen by the user as soloist; never used by the planner). NOT CONFIRMED by a source:
+# accordion right hand F3-A6, classical guitar sounding E2-B5 (common practice values).
+EXTRA_RANGES = {"accordion": (53, 93), "guitar": (40, 83)}
+
+
+def all_ranges():
+    r = dict(EXTRA_RANGES); r.update(RANGES); return r
 KEY = {"Flute": "flute", "Oboe": "oboe", "Clarinet": "clarinet", "Bassoon": "bassoon",
        "Horn": "horn", "Violin I": "violin", "Violin II": "violin", "Viola": "viola",
-       "Cello": "cello", "Double Bass": "double_bass"}
+       "Cello": "cello", "Double Bass": "double_bass", "Accordion": "accordion", "Guitar": "guitar"}
 CLASSES = {"Flute": instrument.Flute, "Oboe": instrument.Oboe, "Clarinet": instrument.Clarinet,
            "Bassoon": instrument.Bassoon, "Horn": instrument.Horn, "Piano": instrument.Piano,
            "Violin I": instrument.Violin, "Violin II": instrument.Violin, "Viola": instrument.Viola,
-           "Cello": instrument.Violoncello, "Double Bass": instrument.Contrabass}
-SCORE_ORDER = ["Flute", "Oboe", "Clarinet", "Bassoon", "Horn", "Piano",
+           "Cello": instrument.Violoncello, "Double Bass": instrument.Contrabass,
+           "Accordion": instrument.Accordion, "Guitar": instrument.AcousticGuitar, "Organ": instrument.PipeOrgan}
+SCORE_ORDER = ["Flute", "Oboe", "Clarinet", "Bassoon", "Horn", "Accordion", "Guitar", "Piano",
                "Violin I", "Violin II", "Viola", "Cello", "Double Bass"]
+SOLO_ONLY = {"Accordion", "Guitar"}     # written into the score only when they have notes (solo mode)
+KEYBOARD_CLASS = {"solo": ("Piano", instrument.Piano), "organ": ("Organ", instrument.PipeOrgan)}
 WINDS = {"Flute", "Oboe", "Clarinet", "Bassoon", "Horn"}
 MAX_WIND_RUN_BEATS = validator.MAX_WIND_RUN_BEATS
 LEVELS = ["mp", "mf", "f"]
@@ -28,7 +38,7 @@ PHRASE_BARS = 4
 SF2 = "/usr/share/sounds/sf2/FluidR3_GM.sf2"
 
 def fit(m, name):
-    lo, hi = RANGES[KEY[name]]
+    lo, hi = RANGES[KEY[name]] if KEY[name] in RANGES else EXTRA_RANGES[KEY[name]]
     while m < lo: m += 12
     while m > hi: m -= 12
     return m if lo <= m <= hi else None
@@ -380,7 +390,7 @@ def realize(s, events, melody, meta, plan):
         if len(e["inner"]) > 1: v["inner2"] = e["inner"][1]
         voices.append(v)
     repair_fifths(events, voices, log)
-    lines = {n: [] for n in SCORE_ORDER if n != "Piano"}
+    lines = {n: [] for n in SCORE_ORDER if n != "Piano"}   # Organ never has lines: it is a keyboard part like Piano
     phrase_of = {}
     for ph in plan["phrases"]:
         for bi in range(ph["bars"][0] - 1, ph["bars"][1]): phrase_of[bi] = ph
@@ -474,7 +484,7 @@ def semitones(shift):
     return 12 * int(round(shift / 12.0))
 
 
-def build_score(s, lines, dyn, piano_mode="off", meta=None):
+def build_score(s, lines, dyn, piano_mode="off", meta=None, acc_extra=0):
     starts = [b[0] for b in meta["bars"]]
     out = stream.Score()
     piano_parts = [copy.deepcopy(p) for p in s.parts]
@@ -482,9 +492,14 @@ def build_score(s, lines, dyn, piano_mode="off", meta=None):
     for name in SCORE_ORDER:
         if name == "Piano":
             if piano_mode == "off": continue
+            kname, kcls = KEYBOARD_CLASS.get(piano_mode, ("Piano", instrument.Piano))
             for pp in piano_parts:
-                pp.partName = "Piano"; pp.insert(0, CLASSES["Piano"]())
+                for old in list(pp.recurse().getElementsByClass(instrument.Instrument)):
+                    pp.remove(old, recurse=True)
+                pp.partName = kname; pp.insert(0, kcls())
                 out.insert(0, pp)
+            continue
+        if name in SOLO_ONLY and not lines.get(name):
             continue
         p = stream.Part(); p.partName = name; p.insert(0, CLASSES[name]())
         for off, ratio in meta["tsigs"]: p.insert(off, meter.TimeSignature(ratio))
@@ -493,7 +508,8 @@ def build_score(s, lines, dyn, piano_mode="off", meta=None):
             tempo_done = True
         for off, dur, midi, role in lines[name]:
             n = note.Note(midi, quarterLength=dur)
-            v = max(20, min(120, LEVEL_VEL[dyn.get(bar_of(starts, off), "mf")] + ROLE_VEL.get(role, 0)))
+            v = max(20, min(120, LEVEL_VEL[dyn.get(bar_of(starts, off), "mf")] + ROLE_VEL.get(role, 0)
+                             + (acc_extra if role != "melody" else 0)))
             n.volume = volume.Volume(velocity=v); n.volume.velocityIsRelative = False
             p.insert(off, n)
         p.makeMeasures(inPlace=True)
@@ -504,7 +520,7 @@ def build_score(s, lines, dyn, piano_mode="off", meta=None):
     from music21 import key as m21key
     concert = piece_key(s)
     for p in out.parts:
-        if p.partName == "Piano":
+        if p.partName in ("Piano", "Organ"):
             continue
         ins = p.getInstrument(returnDefault=False)
         tr = getattr(ins, "transposition", None) if ins is not None else None
@@ -516,7 +532,8 @@ def build_score(s, lines, dyn, piano_mode="off", meta=None):
 
 # ---------- 5. MIDI mix: seating, balance, reverb ----------
 PAN = {"Flute": 50, "Oboe": 68, "Clarinet": 58, "Bassoon": 74, "Horn": 92, "Violin I": 20,
-       "Violin II": 38, "Viola": 84, "Cello": 102, "Double Bass": 114, "Piano": 64}
+       "Violin II": 38, "Viola": 84, "Cello": 102, "Double Bass": 114, "Piano": 64,
+       "Accordion": 64, "Guitar": 64, "Organ": 64}
 VOL = {k: 100 for k in PAN}
 
 def mix_midi(path):
@@ -558,6 +575,47 @@ def _active_db(wav_path):
     rms = np.sqrt((a[:n * fr].reshape(n, fr) ** 2).mean(axis=1))
     act = rms[rms > 0.05 * rms.max()] if rms.max() > 0 else rms
     return 20 * np.log10(np.sqrt((act ** 2).mean()) + 1e-9)
+
+SOLO_ACC_VEL = -24   # heuristic: accompaniment of a soloist this much softer (velocity); Forsyth pp. 187, 197 give the idea only
+SOLO_ACC_VEL_BY = {"Guitar": -36}   # plucked guitar fades fast: accompaniment even softer (heuristic; measured 2026-11-07:
+                                    # at -24 the accompaniment was louder than the guitar 28% of the time)
+
+
+def copy_pedal(src_path, out_path):
+    """Sustain pedal (CC64) of the original piano -> the keyboard track of the score. music21 drops the pedal when it reads
+    MIDI; without it the piano sounded dry and the last arpeggio broke off (user, 2026-11-07). Returns events copied."""
+    import mido
+    src, out = mido.MidiFile(src_path), mido.MidiFile(out_path)
+    ped = []
+    for tr in src.tracks:
+        t = 0
+        for m in tr:
+            t += m.time
+            if m.type == "control_change" and m.control == 64:
+                ped.append((t / src.ticks_per_beat, m.value))
+    if not ped:
+        return 0
+    kb = next((tr for tr in out.tracks if any(m.type == "track_name" and ("Piano" in m.name or "Organ" in m.name)
+                                              for m in tr)), None)
+    if kb is None:
+        return 0
+    ch = next((m.channel for m in kb if m.type == "note_on"), 0)
+    ev, t = [], 0
+    for m in kb:
+        t += m.time
+        ev.append((t, 1, m))
+    for beat, val in ped:
+        ev.append((int(round(beat * out.ticks_per_beat)), 0, mido.Message("control_change", channel=ch, control=64, value=val)))
+    end = [e for e in ev if e[2].type == "end_of_track"]
+    body = sorted((e for e in ev if e[2].type != "end_of_track"), key=lambda e: (e[0], e[1]))
+    last_t = max(e[0] for e in body) if body else 0
+    kb.clear()
+    prev = 0
+    for tick, _, m in body + [(max(last_t, end[0][0]) if end else last_t, 2, end[0][2] if end else mido.MetaMessage("end_of_track"))]:
+        kb.append(m.copy(time=tick - prev)); prev = tick
+    out.save(out_path)
+    return len(ped)
+
 
 def auto_balance(path):
     """Measure each instrument alone (active frames only) and equalize apparent loudness with CC7."""
@@ -607,15 +665,20 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None):
     if texture_fix.figure_enabled():  # ORCH_FIGURE=1: running accompaniment nobody plays -> a string (see texture_fix.py)
         plan, _fc = texture_fix.fill_figuration(plan, meta["fig"], meta["bars"])
         thin_changes = list(thin_changes) + _fc
+    if solo:   # light accompaniment under the soloist (Forsyth pp. 185, 187, 197; see texture_fix.solo_accompaniment)
+        plan, _sa = texture_fix.solo_accompaniment(plan, solo)
+        solo_changes = list(solo_changes) + _sa
     json.dump(plan, open(out_stem + "_plan.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     lines, log = realize(s, events, melody, meta, plan)
     if thin_changes: log["thin_changes"] = thin_changes
     if solo: log["solo"] = {"instrument": solo, "changes": solo_changes}
     dyn = {bi: ph["level"] for ph in plan["phrases"] for bi in range(ph["bars"][0] - 1, ph["bars"][1])}
     log["dynamics_by_bar"] = {b + 1: d for b, d in sorted(dyn.items())}
-    snd = build_score(s, lines, dyn, piano_mode, meta)
+    snd = build_score(s, lines, dyn, piano_mode, meta, acc_extra=SOLO_ACC_VEL_BY.get(solo, SOLO_ACC_VEL) if solo else 0)
     snd.write("midi", fp=out_stem + ".mid")
     mix_midi(out_stem + ".mid")
+    if piano_mode != "off":
+        log["pedal_copied"] = copy_pedal(in_path, out_stem + ".mid")
     try:
         log["loudness_balance"] = auto_balance(out_stem + ".mid")
     except Exception as e:

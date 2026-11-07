@@ -161,14 +161,21 @@ REVIEW_MODE = "Проверить партитуру (готовый оркес�
 PIANO_REVIEW_MODE = "Проверить переложение (готовое фортепиано)"
 mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", "Переложение для фортепиано (из оркестра)", REVIEW_MODE,
                                 PIANO_REVIEW_MODE], key="mode_pick")
-SOLO_OPTIONS = {"Нет (оркестр сам распределяет мелодию)": None, "Фортепиано": "Piano", "Флейта (нежная, невысокая)": "Flute",
-                "Кларнет": "Clarinet", "Гобой": "Oboe", "Скрипка": "Violin I", "Виолончель": "Cello"}
+SOLO_OPTIONS = {"Фортепиано": "Piano", "Флейта (нежная, невысокая)": "Flute", "Кларнет": "Clarinet", "Гобой": "Oboe",
+                "Скрипка": "Violin I", "Виолончель": "Cello", "Аккордеон": "Accordion", "Орган": "Organ", "Гитара": "Guitar"}
+LEAD_MODES = ["Оркестр сам распределяет мелодию", "Один солист на всю пьесу", "Меняющиеся солисты, как в «Болеро»"]
+SOLO_NAMES = dict({v: k for k, v in SOLO_OPTIONS.items()}, Bolero="меняющиеся солисты, как в «Болеро»")
 solo = None
 if mode == "Оркестровка (из фортепиано)":
-    solo = SOLO_OPTIONS[st.selectbox(
-        "Солирующий инструмент", list(SOLO_OPTIONS), key="solo_pick",
-        help="Как в концерте: один инструмент ведёт мелодию от начала до конца, остальные аккомпанируют. "
-             "Фортепиано играет пьесу целиком, оркестр его поддерживает. Выбирается для каждой пьесы отдельно.")]
+    _lead = st.radio("Кто ведёт мелодию", LEAD_MODES, key="lead_pick",
+                     help="Один солист: как в концерте, один инструмент ведёт мелодию от начала до конца, остальные тихо "
+                          "аккомпанируют. «Болеро»: солист меняется только между высказываниями темы (примерно через "
+                          "8 тактов), внутри высказывания мелодию ведёт один инструмент. Выбирается для каждой пьесы.")
+    if _lead == LEAD_MODES[1]:
+        solo = SOLO_OPTIONS[st.selectbox("Солирующий инструмент", list(SOLO_OPTIONS), key="solo_pick",
+                                         help="Фортепиано и орган играют пьесу целиком, оркестр их поддерживает.")]
+    elif _lead == LEAD_MODES[2]:
+        solo = "Bolero"
 orig_up = None
 if mode == PIANO_REVIEW_MODE:
     st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
@@ -223,7 +230,7 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=
     except Exception:
         review = None
     try:                                              # контроль брака: сравнение с оригиналом, звук не меняет
-        gate = quality_gate.check(src, stem + ".mid")
+        gate = quality_gate.check(src, stem + ".mid", solo=bool(solo))
         report["quality_gate"] = {"ok": gate["ok"], "defects": gate["defects"], "warnings": gate["warnings"],
                                   "stats": gate["stats"]}
         json.dump(report, open(stem + "_report.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
@@ -545,7 +552,11 @@ if res:
     warns = [i for i in issues if i[0] == "warning"]
     _solo = (((res.get("report") or {}).get("plan_log") or {}).get("solo") or {})
     if _solo.get("instrument"):
-        st.info("Солирует: %s." % {v: k for k, v in SOLO_OPTIONS.items()}.get(_solo["instrument"], _solo["instrument"]))
+        st.info("Мелодию ведёт: %s." % SOLO_NAMES.get(_solo["instrument"], _solo["instrument"]))
+        if _solo.get("changes"):
+            with st.expander("Кто где солирует и кто молчит в сопровождении"):
+                for _c in _solo["changes"]:
+                    st.write("• " + _c)
     show_gate(res.get("gate"))
     if errors:
         st.error("Найдены серьёзные ошибки: %d. Результат не рекомендуется использовать." % len(errors))

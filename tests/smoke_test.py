@@ -155,6 +155,24 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("контроль брака FAIL (исключение)"); traceback.print_exc(); failed += 1
+# солист и «Болеро» (texture_fix.apply_solo / solo_accompaniment): без фальши, у одного солиста мелодия не скачет,
+# у рояля переносится педаль оригинала
+try:
+    import quality_gate, mido as _mido
+    _src = os.path.join(ROOT, "input", "nocturneincsharpminor.mid")
+    _res = {}
+    for _solo in ("Flute", "Bolero", "Piano"):
+        _st = os.path.join(outdir, "solo_" + _solo)
+        orchestrator.run(_src, _st, solo=_solo)
+        _g = quality_gate.check(_src, _st + ".mid", solo=True)
+        _res[_solo] = (_g["stats"]["foreign"]["bad"], _g["stats"]["melody_hops"],
+                       sum(1 for t in _mido.MidiFile(_st + ".mid").tracks for x in t if x.type == "control_change" and x.control == 64))
+    _ped_src = sum(1 for t in _mido.MidiFile(_src).tracks for x in t if x.type == "control_change" and x.control == 64)
+    ok = (all(v[0] == 0 for v in _res.values()) and _res["Flute"][1] == 0 and _res["Piano"][2] == _ped_src)
+    print("%-30s %s  %s" % ("солист и «Болеро»", "OK " if ok else "FAIL", _res))
+    failed += 0 if ok else 1
+except Exception:
+    print("солист и «Болеро» FAIL (исключение)"); traceback.print_exc(); failed += 1
 # ноты с пометками (нужен verovio; без него проверка пропускается)
 try:
     import score_notation
