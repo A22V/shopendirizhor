@@ -49,6 +49,11 @@ def _flute_up(mean, shift):
 # it falls between the K.545 excerpt (4.7 and 7.6 notes/s) and the nocturne (1.2-2.4 notes/s).
 FAST_HOLD = _os.environ.get("ORCH_FAST_HOLD") == "1"
 FAST_NPS = 4.0
+# ORCH_MELODY_ONE=1 (OFF by default, 2026-11-07): the same rule for EVERY phrase, not only fast ones: the melody is not handed
+# from a wind to a string halfway through a phrase; the strings carry the whole phrase and a wind only doubles it while the
+# phrase fits into one breath. Reason: the user heard the melody "jumping" between instruments every two bars (built-in plan:
+# about 24 handovers in 53 bars). Changing colour only at phrase boundaries is a heuristic; not confirmed by a book page.
+MELODY_ONE = _os.environ.get("ORCH_MELODY_ONE") == "1"
 # ORCH_FAST_VIOLIN=1 (OFF by default): in a fast phrase the melody is led by Violin I only (Czerny, School of Practical
 # Composition vol. 3, p. 22: fast and brilliant passages go to the strings; confirmed). Clarinet, oboe, bassoon and horn get
 # no fast melody but hold harmony (long notes) so they do not fall silent (QX06).
@@ -278,7 +283,7 @@ def make_plan(s, events, melody, meta):
         strings = [spec for spec in p["melody"] if spec[0] not in WIND_MEL]
         if not strings:
             strings = [["Violin I", 0, 0.0]]
-        if FAST_HOLD and p["_nps"] >= FAST_NPS:
+        if (FAST_HOLD and p["_nps"] >= FAST_NPS) or MELODY_ONE:
             # fast phrase: no handover halfway; the strings carry the whole phrase (no breath needed), a wind only doubles
             # while the phrase fits into one breath (MAX_WIND_RUN_BEATS)
             beats = sum(f["len"] for f in feats[a - 1:b])
