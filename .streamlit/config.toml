@@ -12,5 +12,6 @@ font = "serif"
 showSidebarNavigation = false
 
 # Предел размера загружаемого файла (МБ), 2026-11-08: подпись под кнопкой загрузки была «200MB per file».
+# MIDI программа принимает до 2 МБ (проверка в web/app.py), MusicXML и файлы проигрывателя — до 5 МБ.
 [server]
-maxUploadSize = 20
+maxUploadSize = 5

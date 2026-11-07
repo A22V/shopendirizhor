@@ -21,7 +21,7 @@ st.markdown("""<style>
 .block-container{padding-top:1.2rem;padding-left:.6rem;padding-right:.6rem;max-width:1200px}
 </style>""", unsafe_allow_html=True)
 st.markdown("# 🎼 Партитурный проигрыватель")
-st.caption("Каждый инструмент на своём стане, звук считается прямо в вашем браузере. "
+st.caption("Каждый инструмент на своей нотной строке (стане), звук считается прямо в вашем браузере. "
            "Нажмите на название инструмента, чтобы выключить его, «соло» — слушать только его.")
 st.page_link("app.py", label="← Вернуться к оркестровке", icon="🏛")
 
@@ -54,7 +54,7 @@ def _from_job():
 components.html(player_html.bank_panel(), height=170)
 
 src = _from_job()
-up = st.file_uploader("Открыть файл: многодорожечный MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl)",
+up = st.file_uploader("Открыть файл: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ",
                       key="player_file")
 if up is not None:
     data = up.getvalue()

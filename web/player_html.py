@@ -18,6 +18,7 @@ def _b64(name):
 
 def build(prep, bank_url=DEFAULT_BANK_URL, bank_name=DEFAULT_BANK_NAME):
     data = {"parts": prep["parts"], "timemap": prep["timemap"], "tempo": prep["tempo"], "length": prep["length"],
+            "meter": prep.get("meter") or [[0.0, 4, 4]],
             "notes": prep["notes"], "name": prep["name"], "bankUrl": bank_url, "bankName": bank_name,
             "midi": base64.b64encode(prep["sound"]).decode("ascii")}
     svg = "".join('<div class="page">%s</div>' % s for s in prep["pages"])
@@ -49,7 +50,9 @@ input[type=range]{flex:1;min-width:120px;accent-color:var(--red)}
 .chip.off .nm{color:var(--mute);text-decoration:line-through;background:#f3efe7}
 .chip.solo .so{background:var(--gold);color:#fff}
 details{margin-top:6px;font-size:14px}
-#score{padding:6px 4px 60vh}
+#score{padding:6px 4px 60vh;position:relative}
+#line{position:absolute;left:0;top:0;width:3px;margin-left:-1px;background:rgba(31,95,191,.75);border-radius:2px;display:none;pointer-events:none;z-index:3;box-shadow:0 0 6px rgba(31,95,191,.45)}
+button.on{background:#1f5fbf;color:#fff;border-color:#1f5fbf}
 .page svg{width:100%;height:auto;display:block}
 .playing,.playing *{fill:#c0392b!important;stroke:#c0392b!important}
 .small{font-size:12px;color:#6b5a46}
@@ -65,12 +68,13 @@ details{margin-top:6px;font-size:14px}
     <label class="small">Темп <select id="rate"><option value="0.5">×0,5</option><option value="0.75">×0,75</option>
       <option value="1" selected>×1</option><option value="1.25">×1,25</option></select></label>
     <label class="small"><input id="follow" type="checkbox" checked> листать за музыкой</label>
+    <button id="metro" type="button" title="Щелчок на каждую долю, на первую долю такта — выше">🕰 Метроном: выкл</button>
   </div>
   <div id="status">Нажмите «Играть»: загрузится банк звуков.</div>
   <div id="prog"><div></div></div>
   <div id="parts"></div>
 </div>
-<div id="score"><!--SVG--></div>
+<div id="score"><div id="line"></div><!--SVG--></div>
 <script>
 const D = /*DATA*/null;
 const $ = id => document.getElementById(id);
@@ -172,42 +176,123 @@ $("play").onclick = async () => {
   if (P.seq.paused) { P.seq.play(); } else { P.seq.pause(); }
   setTimeout(() => apply(), 50);
 };
-$("stop").onclick = () => { if (!P.seq) return; P.seq.pause(); P.seq.currentTime = 0; resetCursor(); };
-$("seek").oninput = () => { if (!P.seq) return; P.seq.currentTime = $("seek").value / 1000 * D.length; resetCursor(); };
-$("rate").onchange = () => { if (P.seq) P.seq.playbackRate = +$("rate").value; };
-// ---------- указатель по нотам ----------
+$("stop").onclick = () => { if (!P.seq) return; P.seq.pause(); P.seq.currentTime = 0; resetCursor(); resyncMetro(0); };
+$("seek").oninput = () => { if (!P.seq) return; const t = $("seek").value / 1000 * D.length; P.seq.currentTime = t; resetCursor(); resyncMetro(t); };
+$("rate").onchange = () => { if (P.seq) { P.seq.playbackRate = +$("rate").value; resyncMetro(curSec()); } };
+// ---------- время: секунды звука <-> доли нот ----------
 const TM = D.timemap; let idx = -1, active = new Set(), lastScroll = 0;
 function secToQ(sec) {
   const t = D.tempo; let k = 0; while (k + 1 < t.length && t[k + 1][0] <= sec) k++;
   return t[k][1] + (sec - t[k][0]) / t[k][2];
 }
+function qToSec(q) {
+  const t = D.tempo; let k = 0; while (k + 1 < t.length && t[k + 1][1] <= q) k++;
+  return t[k][0] + (q - t[k][1]) * t[k][2];
+}
+const curSec = () => P.seq ? (P.seq.currentHighResolutionTime || P.seq.currentTime || 0) : 0;
 function mark(id, on) { const el = document.getElementById(id); if (el) el.classList.toggle("playing", on); }
 function resetCursor() { active.forEach(id => mark(id, false)); active.clear(); idx = -1; }
+
+// ---------- бегущая полоска ----------
+// Для каждого момента, где начинаются ноты, запоминаем место по горизонтали (середина ноты) и строку партитуры
+// (система станов); между моментами полоска движется плавно, по строке до конца.
+let POS = [];
+function layout() {
+  const sr = $("score").getBoundingClientRect(); POS = [];
+  for (const e of TM) {
+    if (!e.on || !e.on.length) continue;
+    let x = Infinity, sys = null;
+    for (const id of e.on) {
+      const el = document.getElementById(id); if (!el) continue;
+      const r = el.getBoundingClientRect(); if (!r.width && !r.height) continue;
+      x = Math.min(x, r.left + r.width / 2 - sr.left); sys = sys || el.closest(".system");
+    }
+    if (!sys || x === Infinity) continue;
+    const sb = sys.getBoundingClientRect();
+    const p = { q: e.q, x, top: sb.top - sr.top, h: sb.height, sys, right: sb.right - sr.left };
+    if (POS.length && Math.abs(POS[POS.length - 1].q - p.q) < 1e-6) { const l = POS[POS.length - 1]; if (p.x < l.x) l.x = p.x; }
+    else POS.push(p);
+  }
+}
+function drawLine(q) {
+  const line = $("line"); if (!POS.length) { line.style.display = "none"; return null; }
+  let lo = 0, hi = POS.length - 1;
+  if (q <= POS[0].q) hi = 0; else { while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (POS[mid].q <= q) lo = mid; else hi = mid - 1; } }
+  const a = POS[hi], b = POS[hi + 1];
+  let x = a.x;
+  if (b && b.q > a.q && q > a.q) {
+    const f = Math.min(1, (q - a.q) / (b.q - a.q));
+    x = b.sys === a.sys ? a.x + (b.x - a.x) * f : a.x + (Math.max(a.x, a.right - 12) - a.x) * f;
+  }
+  line.style.display = "block"; line.style.height = a.h + "px";
+  line.style.transform = "translate(" + x.toFixed(1) + "px," + a.top.toFixed(1) + "px)";
+  return line;
+}
+let _rz = 0; addEventListener("resize", () => { clearTimeout(_rz); _rz = setTimeout(() => { layout(); drawLine(secToQ(curSec())); }, 200); });
+
+// ---------- метроном ----------
+// Доли берутся из размера такта в файле: 6/8, 9/8, 12/8 — по 3 восьмых на долю; первая доля такта выше по звуку.
+const BEATS = (() => {
+  const out = [], M = D.meter, endQ = secToQ(D.length);
+  for (let i = 0; i < M.length; i++) {
+    const q0 = M[i][0], num = M[i][1], den = M[i][2], q1 = i + 1 < M.length ? M[i + 1][0] : endQ;
+    const compound = den === 8 && num % 3 === 0 && num > 3, beat = compound ? 1.5 : 4 / den, per = compound ? num / 3 : num;
+    for (let q = q0, k = 0; q < q1 - 1e-9; q += beat, k++) out.push({ sec: qToSec(q), accent: k % per === 0 });
+  }
+  return out;
+})();
+let metroOn = false, nextBeat = 0, wasPaused = true;
+function resyncMetro(sec) { nextBeat = BEATS.findIndex(b => b.sec >= sec - 0.01); if (nextBeat < 0) nextBeat = BEATS.length; }
+function click(when, accent) {
+  const o = P.ctx.createOscillator(), g = P.ctx.createGain();
+  o.type = "triangle"; o.frequency.value = accent ? 1760 : 1175;
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(accent ? 0.35 : 0.2, when + 0.003);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + 0.06);
+  o.connect(g); g.connect(P.ctx.destination); o.start(when); o.stop(when + 0.08);
+  P.clicks = (P.clicks || 0) + 1;
+}
+$("metro").onclick = () => {
+  metroOn = !metroOn; $("metro").classList.toggle("on", metroOn);
+  $("metro").textContent = "🕰 Метроном: " + (metroOn ? "вкл" : "выкл"); resyncMetro(curSec());
+};
+
 function tick() {
   if (P.seq) {
-    const sec = P.seq.currentHighResolutionTime || P.seq.currentTime || 0;
+    const sec = curSec(), paused = P.seq.paused;
     $("time").textContent = fmt(sec) + " / " + fmt(D.length);
-    $("play").textContent = P.seq.paused ? "▶ Играть" : "⏸ Пауза";
-    if (!P.seq.paused) $("seek").value = Math.round(1000 * sec / Math.max(D.length, 1));
+    $("play").textContent = paused ? "▶ Играть" : "⏸ Пауза";
+    if (!paused) $("seek").value = Math.round(1000 * sec / Math.max(D.length, 1));
+    if (wasPaused && !paused) resyncMetro(sec);
+    wasPaused = paused;
     const q = secToQ(sec) + 1e-6;
     if (idx >= 0 && idx < TM.length && TM[idx].q > q) resetCursor();     // перемотка назад
-    let moved = false;
     while (idx + 1 < TM.length && TM[idx + 1].q <= q) {
-      idx++; moved = true;
+      idx++;
       for (const id of TM[idx].off || []) { active.delete(id); mark(id, false); }
       for (const id of TM[idx].on || []) { active.add(id); mark(id, true); }
     }
-    if (moved && $("follow").checked && !P.seq.paused && Date.now() - lastScroll > 700) {
-      const first = active.values().next().value, el = first && document.getElementById(first);
-      if (el) { const r = el.getBoundingClientRect(), top = $("bar").getBoundingClientRect().bottom;
-        if (r.top < top + 10 || r.bottom > innerHeight - 40) { window.scrollBy({ top: r.top - top - innerHeight * 0.25, behavior: "smooth" }); lastScroll = Date.now(); } }
+    const line = drawLine(q);
+    if (line && $("follow").checked && !paused && Date.now() - lastScroll > 700) {
+      const r = line.getBoundingClientRect(), top = $("bar").getBoundingClientRect().bottom;
+      if (r.top < top + 4 || r.bottom > innerHeight - 20) {
+        window.scrollBy({ top: r.top - top - 12, behavior: "smooth" }); lastScroll = Date.now();
+      }
     }
-    if (P.seq.isFinished && !P.seq.paused) { P.seq.pause(); }
+    if (metroOn && !paused && P.ctx) {                 // щелчки назначаются чуть вперёд, по часам звука: без «плавания»
+      const rate = P.seq.playbackRate || 1;
+      while (nextBeat < BEATS.length && BEATS[nextBeat].sec <= sec + 0.15 * rate) {
+        const b = BEATS[nextBeat++], dt = (b.sec - sec) / rate;
+        if (dt > -0.03) click(P.ctx.currentTime + Math.max(0, dt), b.accent);
+      }
+    }
+    if (P.seq.isFinished && !paused) { P.seq.pause(); }
   }
   requestAnimationFrame(tick);
 }
 
 renderParts();
+layout(); drawLine(0);
 $("time").textContent = "0:00 / " + fmt(D.length);
 $("play").disabled = false;
 if (D.notes && D.notes.length) $("status").textContent += " " + D.notes.join(" ");

@@ -61,7 +61,7 @@ st.markdown("""<div class='frame warn'>
 with st.expander("Ограничения и приватность", expanded=False):
     st.markdown("""
 - Загружайте только свои пьесы или пьесы, права на которые у вас есть. Загруженный файл и результат оркестровки хранятся на сервере не дольше 6 часов (чтобы результат не терялся, если на телефоне погас экран), потом удаляются.
-- Максимальный размер файла — 2 МБ (около 2000 нот).
+- Размер файла: MIDI до 2 МБ (около 2000 нот), MusicXML до 5 МБ. Подпись «5MB per file» под кнопкой загрузки — встроенная надпись Streamlit (по-английски), это общий предел для любого файла.
 - Программа не умеет превращать запись живой игры (mp3/wav) в MIDI: нужен MIDI с ровным, квантованным ритмом.
 - Пьесы короче 3 тактов и длиннее 100 тактов дают неудовлетворительный результат.
 """)
@@ -70,8 +70,8 @@ if "result" not in st.session_state:
     st.session_state.result = None
 
 st.markdown("🎼 Есть готовая партитура (MIDI или MusicXML)? [**Партитурный проигрыватель** (новая вкладка)](Проигрыватель): "
-            "ноты по станам, звук банком MuseScore, можно выключать инструменты.")
-st.page_link("pages/1_Проигрыватель.py", label="Открыть проигрыватель в этой вкладке", icon="🎼")
+            "каждый инструмент на своей нотной строке, звук банком MuseScore, можно выключать инструменты.")
+st.page_link("pages/1_Проигрыватель.py", label="Открыть здесь", icon="🎼")
 
 st.markdown(theme.SECTION("I", "Загрузите пьесу"), unsafe_allow_html=True)
 # Без фильтра type: на планшетах (iPad, Android) браузер с фильтром ".mid" часто делает MIDI-файлы серыми
@@ -85,7 +85,7 @@ class _Upload:
         return self._data
 
 
-MIDI_EXTS = (".mid", ".midi", ".kar", ".rmi", ".smf", ".bin", ".dat", ".tmp")
+MIDI_EXTS = (".mid", ".midi", ".kar", ".rmi", ".smf", ".bin", ".dat", ".tmp", ".musicxml", ".xml", ".mxl", ".zip")
 
 
 def midi_bytes(data: bytes):
@@ -125,7 +125,7 @@ def checked_midi(f, what="Файл"):
     return _Upload(stem + ".mid", midi)
 
 
-up = checked_midi(st.file_uploader("MIDI-файл (.mid, .midi)", accept_multiple_files=False))
+up = checked_midi(st.file_uploader("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl)", accept_multiple_files=False))
 
 
 def source_mp3(data: bytes):
@@ -201,7 +201,7 @@ orig_up = None
 if mode == PIANO_REVIEW_MODE:
     st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
                "сколько гармонии оркестра сохранилось в переложении.")
-    orig_up = checked_midi(st.file_uploader("Оркестровый оригинал (необязательно, .mid)", accept_multiple_files=False,
+    orig_up = checked_midi(st.file_uploader("Оркестровый оригинал (необязательно, MIDI или MusicXML)", accept_multiple_files=False,
                                             key="orig_up"), "Оригинал")
 go = st.button({"Оркестровка (из фортепиано)": "Создать оркестровку", REVIEW_MODE: "Проверить партитуру",
                 PIANO_REVIEW_MODE: "Проверить переложение"}.get(mode, "Создать переложение"),
@@ -672,7 +672,7 @@ if res:
     _pj = st.session_state.get("job")
     if _pj:
         st.markdown("🎼 [**Открыть в партитурном проигрывателе** (новая вкладка)](Проигрыватель?job=%s)" % _pj)
-        st.page_link("pages/1_Проигрыватель.py", label="…или открыть проигрыватель в этой вкладке", icon="🎼")
+        st.page_link("pages/1_Проигрыватель.py", label="…или открыть здесь", icon="🎼")
     if res["mp3"]:
         st.audio(res["mp3"], format="audio/mpeg")
         _sf = os.path.basename(audio_tools.LAST_SOUNDFONT or "")

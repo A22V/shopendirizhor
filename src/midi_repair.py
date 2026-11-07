@@ -171,6 +171,16 @@ def _chunks(b):
 
 
 def repair(data, name=""):
+    """Любой вход (MIDI в любом виде или MusicXML) -> чистый MIDI. MusicXML переводится в MIDI (2026-11-08)."""
+    pre = []
+    if is_musicxml(data, name):
+        data, note = from_musicxml(data, name)
+        pre.append(note)
+    clean, fixes = _repair_midi(data, name)
+    return clean, pre + fixes
+
+
+def _repair_midi(data, name=""):
     raw, fixes = _find(data, name)
     if len(raw) < 14:
         raise MidiRepairError("файл слишком короткий: MIDI обрезан в самом начале")
@@ -224,6 +234,32 @@ def repair(data, name=""):
         others = [tr for tr in tracks if tr is not src]
         tracks = others + new
         fixes.append("все инструменты были в одной дорожке (формат 0) — разложены по %d дорожкам" % len(chans))
+    # нулевые ноты (форшлаги из music21): «отпустить» стоит раньше «нажать» в том же тике -> нота длиной 1/32
+    grace = 0
+    short = max(1, tpb // 8)
+    for k, tr in enumerate(tracks):
+        tr = sorted(tr, key=lambda x: x[0])
+        active, out = {}, []
+        for idx, (t, m) in enumerate(tr):
+            if m.type in ("note_off", "note_on") and not (m.type == "note_on" and m.velocity > 0):
+                key = (m.channel, m.note)
+                if not active.get(key):
+                    later = any(t2 == t and m2.type == "note_on" and m2.velocity > 0 and (m2.channel, m2.note) == key
+                                for t2, m2 in tr[idx + 1:idx + 64] if t2 == t)
+                    if later:
+                        nxt = min([t2 for t2, m2 in tr[idx + 1:] if t2 > t and m2.type == "note_on" and m2.velocity > 0
+                                   and (m2.channel, m2.note) == key] + [t + short])
+                        out.append((max(t + 1, nxt), m))
+                        grace += 1
+                        continue
+                else:
+                    active[key] -= 1
+            elif m.type == "note_on":
+                active[(m.channel, m.note)] = active.get((m.channel, m.note), 0) + 1
+            out.append((t, m))
+        tracks[k] = sorted(out, key=lambda x: x[0])     # устойчиво: порядок в одном тике сохраняется
+    if grace:
+        fixes.append("нот нулевой длины (форшлаги) сделано короткими: %d" % grace)
     # незакрытые ноты
     hanging = 0
     for tr in tracks:
@@ -259,8 +295,66 @@ def repair(data, name=""):
     return clean, fixes
 
 
+def is_musicxml(data, name=""):
+    """MusicXML: .musicxml/.xml (текст) или .mxl (zip с MusicXML внутри)."""
+    if data[:2] == b"PK":
+        try:
+            names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+        except Exception:
+            return False
+        if any(n.lower().endswith((".mid", ".midi", ".kar")) for n in names):
+            return False
+        return any(n.lower().endswith((".musicxml", ".xml")) and not n.startswith("META-INF") for n in names)
+    head = data[:20000]
+    return b"<score-partwise" in head or b"<score-timewise" in head
+
+
+def drop_grace(sc):
+    """Убирает форшлаги (ноты без длительности) перед записью MIDI: music21 пишет их нулевой длины, и в MIDI они
+    путают пары «нажал/отпустил» с соседними нотами той же высоты. Возвращает число убранных."""
+    n = 0
+    for el in list(sc.recurse().notes):
+        try:
+            if el.duration.isGrace:
+                el.activeSite.remove(el)
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
+def from_musicxml(data, name=""):
+    """MusicXML -> MIDI (байты) через music21. Повторы (репризы, вольты) разворачиваются, как при экспорте
+    MIDI из MuseScore; если развернуть не удалось — играется как написано."""
+    import os, sys, tempfile
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import music21, score_player
+    try:
+        xml = score_player._read_musicxml_text(data, name)
+        sc = music21.converter.parseData(xml, format="musicxml")
+    except Exception as e:
+        raise MidiRepairError("MusicXML не читается (%s: %s)" % (type(e).__name__, str(e)[:120]))
+    note = "MusicXML переведён в MIDI"
+    ng = drop_grace(sc)
+    try:
+        ex = sc.expandRepeats()
+        if ex is not None and ex.highestTime > sc.highestTime + 1e-6:
+            sc, note = ex, note + " (повторы развёрнуты)"
+    except Exception:
+        pass
+    if ng:
+        note += "; форшлаги (короткие украшения) не озвучены: %d" % ng
+    path = os.path.join(tempfile.mkdtemp(prefix="xml2mid_"), "score.mid")
+    try:
+        sc.write("midi", fp=path)
+    except Exception as e:
+        raise MidiRepairError("MusicXML не удалось превратить в MIDI (%s: %s)" % (type(e).__name__, str(e)[:120]))
+    with open(path, "rb") as f:
+        return f.read(), note
+
+
 def text(fixes):
-    return "Файл отремонтирован: " + "; ".join(fixes) + "." if fixes else ""
+    return "Файл подготовлен: " + "; ".join(fixes) + "." if fixes else ""
 
 
 if __name__ == "__main__":

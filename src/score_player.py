@@ -145,6 +145,27 @@ def tempo_map(mid):
     return out
 
 
+def meter_map(mid):
+    """[(доля_от_начала, числитель, знаменатель)] из MIDI: для метронома (сильная доля — первая в такте)."""
+    tpb, ev = mid.ticks_per_beat, []
+    for tr in mid.tracks:
+        t = 0
+        for m in tr:
+            t += m.time
+            if m.type == "time_signature":
+                ev.append((t / tpb, m.numerator, m.denominator))
+    ev.sort()
+    out = []
+    for q, n, d in ev:
+        if out and abs(out[-1][0] - q) < 1e-9:
+            out[-1] = (q, n, d)
+        elif not out or (out[-1][1], out[-1][2]) != (n, d):
+            out.append((q, n, d))
+    if not out or out[0][0] > 0:
+        out.insert(0, (0.0, 4, 4))
+    return out
+
+
 def _read_musicxml_text(data, name):
     if name.lower().endswith(".mxl") or data[:2] == b"PK":
         with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -179,7 +200,11 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
             key, ru, order = identify(src or (inst.instrumentName if inst else ""), prog)
             parts.append({"key": key, "label": ru, "order": order, "source": src})
         mid_path = os.path.join(work, "sound.mid")
-        sc.write("midi", fp=mid_path)
+        import midi_repair
+        snd = music21.converter.parseData(xml, format="musicxml")     # отдельная копия для звука
+        if midi_repair.drop_grace(snd):
+            notes.append("Форшлаги видны в нотах, но не звучат.")
+        snd.write("midi", fp=mid_path)
         mid = mido.MidiFile(mid_path)
         # music21 даёт одинаковым инструментам (скрипка I и II) один канал: тогда их нельзя выключить по
         # отдельности. Каждой дорожке с нотами — свой канал (10-й только ударным).
@@ -278,7 +303,7 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
                 "m": e.get("measureOn")} for e in tm]
     smid = mido.MidiFile(file=io.BytesIO(sound))
     return {"parts": [{k: p.get(k) for k in ("key", "label", "source", "channels")} for p in parts],
-            "pages": pages, "timemap": timemap, "tempo": tempo_map(smid), "length": smid.length,
+            "pages": pages, "timemap": timemap, "tempo": tempo_map(smid), "meter": meter_map(smid), "length": smid.length,
             "sound": sound, "notes": notes, "name": name}
 
 

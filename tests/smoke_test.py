@@ -253,7 +253,13 @@ try:
             midi_repair.repair(_bad); _ok = False
         except midi_repair.MidiRepairError:
             pass
-    print("%-30s %s  случаев=%d" % ("ремонт MIDI", "OK " if _ok else "FAIL", len(_cases)))
+    # MusicXML на входе: переводится в MIDI (оркестровка, проверки); форшлаги не «зависают»
+    import music21 as _m21
+    _x = os.path.join(outdir, "smoke_input.musicxml")
+    _m21.converter.parse(os.path.join(ROOT, "input", "test_piano_input.mid")).write("musicxml", fp=_x)
+    _cx, _fxx = midi_repair.repair(open(_x, "rb").read(), "p.musicxml")
+    _ok = _ok and _fxx and _fxx[0].startswith("MusicXML") and not any("незакрыт" in f for f in _fxx)
+    print("%-30s %s  случаев=%d + MusicXML" % ("ремонт MIDI", "OK " if _ok else "FAIL", len(_cases)))
     failed += 0 if _ok else 1
 except Exception:
     print("ремонт MIDI FAIL (исключение)"); traceback.print_exc(); failed += 1
@@ -272,6 +278,7 @@ try:
     ok = ok and _ord == sorted(_ord) and len(labels) >= 3                       # станы в порядке партитуры
     ok = ok and len(set(c for p in _pp["parts"] for c in p["channels"])) == len(_pp["parts"])    # у каждого свой канал
     ok = ok and _pp["pages"] and len(_pp["timemap"]) > 10 and _pp["tempo"][0][0] == 0
+    ok = ok and _pp["meter"] and _pp["meter"][0][0] == 0                      # размер такта для метронома
     _h = player_html.build(_pp)
     ok = ok and "WorkletSynthesizer" not in _h[:2000] and "LIB_B64" not in _h and "/*DATA*/" not in _h
     print("%-30s %s  станов=%d событий=%d страница=%d КБ" % ("партитурный проигрыватель", "OK " if ok else "FAIL",
