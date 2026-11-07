@@ -3,7 +3,7 @@
 Запуск локально:  streamlit run web/app.py
 Размещение в облаке: см. docs/DEPLOY.md
 """
-import os, sys, io, json, tempfile, zipfile, shutil, traceback
+import os, sys, io, json, tempfile, zipfile, shutil, traceback, time
 import streamlit as st
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -32,6 +32,7 @@ st.set_page_config(page_title="Оркестратор", page_icon="🎼", layout
 # Украшения только в шапке, по краям и в углах листа; текст всегда на сплошном светлом листе.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import theme                 # noqa: E402
+import progress              # noqa: E402
 st.markdown(theme.CSS(), unsafe_allow_html=True)
 _first_visit = not st.session_state.get("bq_opened")     # занавес раздвигается только при первом входе
 st.session_state["bq_opened"] = True
@@ -123,7 +124,9 @@ def source_mp3(data: bytes):
         f.write(data)
     res = {"key": key, "mp3": None, "soundfont": None, "error": None}
     try:
+        _t0 = time.time()
         out = audio_tools.render_mp3(mid, mp3)
+        progress.learn("mp3", time.time() - _t0, progress.midi_seconds(data))   # для счётчика: скорость записи в облаке
         res["mp3"] = open(out, "rb").read()
         res["soundfont"] = os.path.basename(audio_tools.LAST_SOUNDFONT or "")
     except Exception as e:
@@ -167,8 +170,10 @@ go = st.button({"Оркестровка (из фортепиано)": "Созд�
                disabled=up is None, use_container_width=True)
 
 
-def process(data: bytes, name: str, use_llm_flag: bool = False):
-    """Runs the full pipeline in a private temporary folder and returns the list of result files."""
+def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None):
+    """Runs the full pipeline in a private temporary folder and returns the list of result files.
+    prog: progress.Steps (шаги llm/plan, mp3, review, notes) или None."""
+    step = (lambda k: prog.go(k)) if prog else (lambda k: None)
     work = tempfile.mkdtemp(prefix="shopendirizhor_")
     src = os.path.join(work, "input.mid")
     with open(src, "wb") as f:
@@ -176,6 +181,7 @@ def process(data: bytes, name: str, use_llm_flag: bool = False):
     stem = os.path.join(work, "result")
     llm_log = None
     planner_info = None
+    step("llm" if use_llm_flag else "plan")
     if use_llm_flag:
         llm_planner.MODELS_SERVED.clear()
         log, issues, names, llm_log, _pp = llm_planner.orchestrate_with_llm(
@@ -195,16 +201,25 @@ def process(data: bytes, name: str, use_llm_flag: bool = False):
         except Exception:
             report.pop("planner", None)
     mp3 = None
+    step("mp3")
     try:
         out = audio_tools.render_mp3(stem + ".mid", stem + ".mp3")
         mp3 = out if os.path.exists(out) else None
     except Exception:
         mp3 = None
+    step("review")
     try:
         review = score_review.review(stem + ".mid", stem + ".musicxml")
     except Exception:
         review = None
+    step("notes")
     score_notation.build(review, stem + ".musicxml", stem + ".mid")   # ноты с пометками; ошибка пишется в review["notation_error"]
+    if prog:                                          # фактическое время шагов: в отчёт (и в ZIP), для уточнения счётчика
+        report["timings_s"] = prog.finish()
+        try:
+            json.dump(report, open(stem + "_report.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        except Exception:
+            pass
     return {"work": work, "stem": stem, "plan": plan, "report": report, "issues": issues, "llm_log": llm_log,
             "mp3": mp3, "name": os.path.splitext(name)[0], "review": review}
 
@@ -254,18 +269,23 @@ if go and up is not None and mode == REVIEW_MODE:
     if up.size > 2 * 1024 * 1024:
         st.error("Файл больше 2 МБ.")
     else:
+        _prog = progress.Steps([("review", "рецензия"), ("notes", "ноты с пометками")], progress.midi_seconds(up.getvalue()))
         with st.spinner("Проверяю партитуру..."):
             try:
                 _work = tempfile.mkdtemp(prefix="review_")
                 _src = os.path.join(_work, "score.mid")
                 with open(_src, "wb") as _f:
                     _f.write(up.getvalue())
+                _prog.go("review")
                 _rv = score_review.review(_src)
                 if not _rv["stats"]["тактов"]:
                     raise ValueError("в файле не найдено ни одной дорожки оркестровых инструментов")
+                _prog.go("notes")
                 score_notation.build(_rv, None, _src)
+                _prog.finish()
                 st.session_state.result = {"mode": "review", "review": _rv, "name": os.path.splitext(up.name)[0]}
             except Exception:
+                _prog.abort()
                 st.session_state.result = None
                 st.error("Не удалось проверить файл. Нужен MIDI оркестровки, где дорожки названы по инструментам "
                          "(Flute, Oboe, Clarinet, Bassoon, Horn, Violin, Viola, Cello, Double Bass).")
@@ -275,8 +295,11 @@ elif go and up is not None and mode == "Переложение для форте
     if up.size > 2 * 1024 * 1024:
         st.error("Файл больше 2 МБ.")
     else:
+        _prog = progress.Steps([("llm_reduce", "модель выбирает голоса, программа делает переложение") if use_llm else
+                                ("reduce", "переложение"), ("mp3", "запись MP3")], progress.midi_seconds(up.getvalue()))
         with st.spinner("Делаю редукцию..."):
             try:
+                _prog.go("llm_reduce" if use_llm else "reduce")
                 _work = tempfile.mkdtemp(prefix="reduction_")
                 _src = os.path.join(_work, "orchestra.mid")
                 with open(_src, "wb") as _f:
@@ -287,14 +310,17 @@ elif go and up is not None and mode == "Переложение для форте
                 else:
                     _stats = reduction.reduce_to_piano(_src, _out)
                 _mp3 = os.path.join(_work, "piano_reduction.mp3")
+                _prog.go("mp3")
                 try:
                     _mp3 = audio_tools.render_mp3(_out, _mp3)
                 except Exception:
                     _mp3 = None
+                _prog.finish()
                 st.session_state.result = {"mode": "reduction", "stats": _stats, "midi": _out,
                                            "mp3": _mp3 if _mp3 and os.path.exists(_mp3) else None,
                                            "name": os.path.splitext(up.name)[0]}
             except Exception:
+                _prog.abort()
                 st.session_state.result = None
                 st.error("Не удалось сделать редукцию. Проверьте, что это MIDI-файл оркестровки.")
                 with st.expander("Подробности для разработчика"):
@@ -303,8 +329,11 @@ elif go and up is not None and mode == PIANO_REVIEW_MODE:
     if up.size > 2 * 1024 * 1024 or (orig_up is not None and orig_up.size > 2 * 1024 * 1024):
         st.error("Файл больше 2 МБ.")
     else:
+        _prog = progress.Steps([("piano_review", "проверка рук и гармонии"), ("notes", "ноты с пометками")],
+                               progress.midi_seconds(up.getvalue()))
         with st.spinner("Проверяю переложение..."):
             try:
+                _prog.go("piano_review")
                 _work = tempfile.mkdtemp(prefix="preview_")
                 _src = os.path.join(_work, "piano.mid")
                 with open(_src, "wb") as _f:
@@ -317,9 +346,12 @@ elif go and up is not None and mode == PIANO_REVIEW_MODE:
                 _rv = piano_review.review(_src, _orig)
                 if not _rv["stats"]["нот"]:
                     raise ValueError("в файле нет нот")
+                _prog.go("notes")
                 score_notation.build_hands(_rv)   # ноты с пометками; ошибка пишется в _rv["notation_error"]
+                _prog.finish()
                 st.session_state.result = {"mode": "piano_review", "review": _rv, "name": os.path.splitext(up.name)[0]}
             except Exception:
+                _prog.abort()
                 st.session_state.result = None
                 st.error("Не удалось проверить файл. Нужен MIDI фортепиано (одна или две дорожки).")
                 with st.expander("Подробности для разработчика"):
@@ -328,10 +360,14 @@ elif go and up is not None:
     if up.size > 2 * 1024 * 1024:
         st.error("Файл больше 2 МБ. Пожалуйста, загрузите более короткую пьесу.")
     else:
-        with st.spinner("Оркестровка выполняется. Обычно это занимает меньше минуты..."):
+        _prog = progress.Steps([("llm", "модель пишет план, программа расставляет ноты") if use_llm else
+                                ("plan", "план фраз и ноты"), ("mp3", "запись MP3"), ("review", "рецензия"),
+                                ("notes", "ноты с пометками")], progress.midi_seconds(up.getvalue()))
+        with st.spinner("Оркестровка выполняется..."):
             try:
-                st.session_state.result = process(up.getvalue(), up.name, use_llm_flag=use_llm)
+                st.session_state.result = process(up.getvalue(), up.name, use_llm_flag=use_llm, prog=_prog)
             except Exception as e:
+                _prog.abort()
                 st.session_state.result = None
                 st.error("Не удалось обработать файл. Проверьте, что это сольная фортепианная пьеса в MIDI с ровным ритмом.")
                 with st.expander("Подробности для разработчика"):
