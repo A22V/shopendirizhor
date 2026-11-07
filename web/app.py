@@ -176,6 +176,11 @@ if mode == "Оркестровка (из фортепиано)":
                                          help="Фортепиано и орган играют пьесу целиком, оркестр их поддерживает.")]
     elif _lead == LEAD_MODES[2]:
         solo = "Bolero"
+    perc = st.checkbox("Лёгкие ударные для ритма (как в эстрадно-симфоническом оркестре)", value=False, key="perc_pick",
+                       help="Тихая бочка, обод малого барабана и хай-хэт по размеру такта; громкость следует фразам. "
+                            "Ноты оркестра не меняются. Ударные есть в MIDI и MP3, в нотах их нет.")
+else:
+    perc = False
 orig_up = None
 if mode == PIANO_REVIEW_MODE:
     st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
@@ -187,7 +192,7 @@ go = st.button({"Оркестровка (из фортепиано)": "Созд�
                disabled=up is None, use_container_width=True)
 
 
-def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=None):
+def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=None, perc=False):
     """Runs the full pipeline in a private temporary folder and returns the list of result files.
     prog: progress.Steps (шаги llm/plan, mp3, review, notes) или None."""
     step = (lambda k: prog.go(k)) if prog else (lambda k: None)
@@ -202,13 +207,13 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=
     if use_llm_flag:
         llm_planner.MODELS_SERVED.clear()
         log, issues, names, llm_log, _pp = llm_planner.orchestrate_with_llm(
-            src, stem, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY, solo=solo)
+            src, stem, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY, solo=solo, percussion=perc)
         plan = json.load(open(_pp, encoding="utf-8"))
         planner_info = {"provider": PROVIDER, "model_requested": PROVIDER_MODEL,
                         "model_served_by_api": sorted(set(llm_planner.MODELS_SERVED)),
                         "requests": len(llm_planner.MODELS_SERVED)}
     else:
-        log, issues, names = orchestrator.run(src, stem, "off", None, solo=solo)
+        log, issues, names = orchestrator.run(src, stem, "off", None, solo=solo, percussion=perc)
         plan = json.load(open(stem + "_plan.json", encoding="utf-8"))
     report = json.load(open(stem + "_report.json", encoding="utf-8"))
     if planner_info:                                  # в отчёт: какая модель писала план (видно и в ZIP)
@@ -412,7 +417,7 @@ elif go and up is not None:
                                 ("notes", "ноты с пометками")], progress.midi_seconds(up.getvalue()))
         with st.spinner("Оркестровка выполняется..."):
             try:
-                st.session_state.result = process(up.getvalue(), up.name, use_llm_flag=use_llm, prog=_prog, solo=solo)
+                st.session_state.result = process(up.getvalue(), up.name, use_llm_flag=use_llm, prog=_prog, solo=solo, perc=perc)
             except Exception as e:
                 _prog.abort()
                 st.session_state.result = None

@@ -173,6 +173,23 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("солист и «Болеро» FAIL (исключение)"); traceback.print_exc(); failed += 1
+# лёгкие ударные (percussion.py): отдельная дорожка на 10-м канале, ноты оркестра те же, контроль брака их не считает
+try:
+    import quality_gate, mido as _mido
+    _src = os.path.join(ROOT, "input", "k545_piano_excerpt.mid")
+    _a, _b = os.path.join(outdir, "perc_off"), os.path.join(outdir, "perc_on")
+    orchestrator.run(_src, _a); _lg, _, _ = orchestrator.run(_src, _b, percussion=True)
+    _na = [(t.name, [(x.note, x.time) for x in t if x.type == "note_on"]) for t in _mido.MidiFile(_a + ".mid").tracks]
+    _mb = _mido.MidiFile(_b + ".mid")
+    _nb = [(t.name, [(x.note, x.time) for x in t if x.type == "note_on"]) for t in _mb.tracks if t.name != "Percussion"]
+    _pt = [t for t in _mb.tracks if t.name == "Percussion"]
+    ok = (_na == _nb and len(_pt) == 1 and _lg.get("percussion", 0) > 0
+          and all(x.channel == 9 for x in _pt[0] if x.type == "note_on")
+          and quality_gate.check(_src, _b + ".mid")["stats"]["foreign"]["bad"] == 0)
+    print("%-30s %s  ударов=%s" % ("лёгкие ударные", "OK " if ok else "FAIL", _lg.get("percussion")))
+    failed += 0 if ok else 1
+except Exception:
+    print("лёгкие ударные FAIL (исключение)"); traceback.print_exc(); failed += 1
 # ноты с пометками (нужен verovio; без него проверка пропускается)
 try:
     import score_notation

@@ -408,7 +408,18 @@ def realize(s, events, melody, meta, plan):
             if fitted is None: log["dropped"] += 1; continue
             if fitted != midi + shift: log["octave_shifts"] += 1
             lines[name].append([offset, dur, fitted, role])
-    for m in melody: put(m["offset"], m["dur"], m["pitch"], "melody")
+    owners = plan.get("melody_owner")   # «Болеро»: кто ведёт мелодию с какой доли (texture_fix.apply_solo)
+    if owners:
+        obeats = [o[0] for o in owners]
+        for m in melody:
+            k = max(0, bisect.bisect_right(obeats, m["offset"] + 1e-9) - 1)
+            name, shift = owners[k][1], semitones(owners[k][2])
+            fitted = fit(m["pitch"] + shift, name)
+            if fitted is None: log["dropped"] += 1; continue
+            if fitted != m["pitch"] + shift: log["octave_shifts"] += 1
+            lines[name].append([m["offset"], m["dur"], fitted, "melody"])
+    else:
+        for m in melody: put(m["offset"], m["dur"], m["pitch"], "melody")
     for e, v in zip(events, voices):
         for role in ("bass", "inner1", "inner2"):
             if role in v:
@@ -576,8 +587,8 @@ def _active_db(wav_path):
     act = rms[rms > 0.05 * rms.max()] if rms.max() > 0 else rms
     return 20 * np.log10(np.sqrt((act ** 2).mean()) + 1e-9)
 
-SOLO_ACC_VEL = -24   # heuristic: accompaniment of a soloist this much softer (velocity); Forsyth pp. 187, 197 give the idea only
-SOLO_ACC_VEL_BY = {"Guitar": -36}   # plucked guitar fades fast: accompaniment even softer (heuristic; measured 2026-11-07:
+SOLO_ACC_VEL = -10   # heuristic (v3: -24 was "almost inaudible" for the user, 2026-11-07): accompaniment of a soloist this much softer (velocity); Forsyth pp. 187, 197 give the idea only
+SOLO_ACC_VEL_BY = {"Guitar": -20}   # plucked guitar fades fast: accompaniment even softer (heuristic; measured 2026-11-07:
                                     # at -24 the accompaniment was louder than the guitar 28% of the time)
 
 
@@ -645,7 +656,7 @@ def auto_balance(path):
     mid.save(path)
     return result
 
-def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None):
+def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussion=False):
     s, events, melody, meta = analyze(in_path)
     import phrase_planner
     plan = json.load(open(plan_path, encoding="utf-8")) if plan_path else phrase_planner.make_plan(s, events, melody, meta)
@@ -683,6 +694,11 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None):
         log["loudness_balance"] = auto_balance(out_stem + ".mid")
     except Exception as e:
         log["loudness_balance"] = {"error": str(e)}
+    if percussion:   # light percussion for rhythm (src/percussion.py); added AFTER loudness balance so drums stay soft
+        import percussion as _perc
+        _clx = {ph["bars"][0] - 1 for ph in plan["phrases"] if ph.get("climax")}
+        _bpm = meta["tempos"][0][1] if meta.get("tempos") else 100.0
+        log["percussion"] = _perc.add(out_stem + ".mid", meta["bars"], dyn, _clx, meta.get("tsigs"), _bpm)
     written = snd.toWrittenPitch(inPlace=False)
     add_dynamics(written, dyn)   # dynamics must be written into the MusicXML too (MuseScore shows them)
     written.write("musicxml", fp=out_stem + ".musicxml")

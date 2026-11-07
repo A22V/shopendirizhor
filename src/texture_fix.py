@@ -258,6 +258,25 @@ def _solo_shift(pitches, name, ranges):
     return _solo_cost(pitches, name, ranges)[1]
 
 
+def _switch_beat(melody, t_b, bars):
+    """Где передать мелодию следующему солисту рядом с тактовой чертой t_b (в долях). Конец мысли — долгая нота и пауза
+    после неё; передаём на первой ноте после такого места, ищем в пределах такта до и после черты.
+    Сила места = длина ноты + 3 × пауза − 0,5 × расстояние до черты (числа — эвристика, подобраны 2026-11-07 на пьесе
+    пользователя: на 5 стыках из 5 передача ушла с середины мысли)."""
+    bar_len = bars[0][1] if bars else 4.0
+    mel = sorted(melody, key=lambda m: m["offset"])
+    best = (None, t_b)
+    for i in range(len(mel) - 1):
+        a, b = mel[i], mel[i + 1]
+        if not (t_b - bar_len - 1e-9 <= b["offset"] <= t_b + bar_len + 1e-9):
+            continue
+        gap = max(0.0, b["offset"] - (a["offset"] + a["dur"]))
+        score = a["dur"] + 3.0 * gap - 0.5 * abs(b["offset"] - t_b)
+        if best[0] is None or score > best[0]:
+            best = (score, b["offset"])
+    return best[1]
+
+
 def apply_solo(plan, solo, melody, bars):
     """Назначает солиста. Возвращает (новый_план, изменения, piano_mode). solo: None/"" — ничего не меняется.
     melody: ноты мелодии из анализа ({"offset","pitch"}); bars: [(начало, длина)] тактов в долях."""
@@ -288,7 +307,7 @@ def apply_solo(plan, solo, melody, bars):
                 groups[-1] += cur      # короткий хвост — к предыдущему высказыванию
             else:
                 groups.append(cur)
-        prev, used = None, {n: 0 for n in BOLERO_POOL}
+        prev, used, owners = None, {n: 0 for n in BOLERO_POOL}, []
         for g in groups:
             ps = [p for j in g for p in pitches_of(phrases[j])]
             cands = [n for n in BOLERO_POOL if n != prev] or BOLERO_POOL
@@ -297,6 +316,17 @@ def apply_solo(plan, solo, melody, bars):
             prev = pick
             for j in g:
                 who_for[j] = pick
+            a = phrases[g[0]]["bars"][0]
+            t_b = starts[a - 1] if a - 1 < len(starts) else 0.0
+            owners.append([_switch_beat(melody, t_b, bars) if owners else 0.0, pick, _solo_cost(ps, pick, ranges)[1]])
+        plan["melody_owner"] = owners      # orchestrator.realize: кто играет мелодию с какой доли (вместо тактов фраз)
+        # соседние солисты не играют сопровождение рядом со стыком (иначе у инструмента две ноты сразу)
+        for gi, g in enumerate(groups):
+            near = {owners[k][1] for k in (gi - 1, gi + 1) if 0 <= k < len(owners)}
+            for j in (g[0], g[-1]):
+                for role in ("inner1", "inner2", "bass", "figuration"):
+                    if phrases[j].get(role):
+                        phrases[j][role] = [sp for sp in phrases[j][role] if sp[0] not in near]
             changes.append("такты %d–%d: солирует %s" % (phrases[g[0]]["bars"][0], phrases[g[-1]]["bars"][1],
                                                           SOLO_CHOICES.get(pick, pick.lower() if pick != "Horn" else "валторна")))
     for k, ph in enumerate(phrases):
@@ -331,22 +361,24 @@ def apply_solo(plan, solo, melody, bars):
 
 
 def solo_accompaniment(plan, solo):
-    """Лёгкое сопровождение солиста (Форсайт с. 185, 187, 197; см. выше). Вызывать ПОСЛЕ всех заполнений плана.
-    Возвращает (новый_план, изменения)."""
+    """Сопровождение солиста. Вызывать ПОСЛЕ всех заполнений плана. Возвращает (новый_план, изменения).
+    v3 (2026-11-07, отзыв пользователя на v2: «слишком занизил громкость… играют только скрипки»): духовые снова
+    подпевают; убираем только то, что подтверждено: быстрое сопровождение (фигурация) — у струнных (Черни, Op. 600,
+    т. 3, с. 22), при солирующей флейте контрабас молчит (Форсайт с. 185). Тише сопровождение делает
+    orchestrator.SOLO_ACC_VEL."""
     if not solo:
         return plan, []
     plan = copy.deepcopy(plan)
     changes = []
-    quiet_winds = {"Flute", "Oboe", "Clarinet", "Bassoon"}
+    winds = {"Flute", "Oboe", "Clarinet", "Bassoon", "Horn"}
     for ph in plan.get("phrases", []):
         soloists = {sp[0] for sp in ph.get("melody", []) or []}
-        climax = bool(ph.get("climax"))
         removed = []
         for role in ("inner1", "inner2", "bass", "figuration"):
             keep = []
             for sp in ph.get(role, []) or []:
                 n = sp[0]
-                if n in quiet_winds and n not in soloists and not climax:
+                if role == "figuration" and n in winds:
                     removed.append(n); continue
                 if n == "Double Bass" and "Flute" in soloists:
                     removed.append(n); continue

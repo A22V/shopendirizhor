@@ -55,6 +55,8 @@ def _notes(path):
                 bpb = x.numerator * 4.0 / x.denominator
             if x.type == "control_change" and x.control == 64:
                 pedal.append((t / tpb, x.value >= 64))
+            if x.type in ("note_on", "note_off") and x.channel == 9:
+                continue                              # ударные (10-й канал GM) — не ноты гармонии
             if x.type == "note_on" and x.velocity > 0:
                 on.setdefault((x.channel, x.note), []).append(t)
             elif x.type in ("note_on", "note_off") and on.get((x.channel, x.note)):
