@@ -62,16 +62,20 @@ def render_wav(mid, wav, sr=44100):
         raise RuntimeError("Нет fluidsynth или звукового банка (.sf2). Запустите: python setup_check.py")
     last_err = None
     for sf in sfs:
-        try:
-            if os.path.exists(wav): os.remove(wav)
-            subprocess.run([fs, "-ni", "-F", wav, "-r", str(sr), sf, mid], check=True, timeout=300,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if _wav_has_sound(wav):
-                LAST_SOUNDFONT = sf
-                return
-            last_err = RuntimeError("тишина с банком " + os.path.basename(sf))
-        except Exception as e:   # нехватка памяти, сбой, слишком долго: пробуем следующий банк
-            last_err = e
+        # 2026-11-07: сначала с «загрузкой только нужных звуков» (synth.dynamic-sample-loading): банк MS Basic
+        # занимал ~557 МБ, так ~201 МБ; звук побайтно тот же (проверено на пьесе 53 такта). Если версия
+        # fluidsynth настройку не знает или запись не удалась — повтор по-старому, без неё.
+        for opts in (["-o", "synth.dynamic-sample-loading=1"], []):
+            try:
+                if os.path.exists(wav): os.remove(wav)
+                subprocess.run([fs, "-ni"] + opts + ["-F", wav, "-r", str(sr), sf, mid], check=True, timeout=300,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if _wav_has_sound(wav):
+                    LAST_SOUNDFONT = sf
+                    return
+                last_err = RuntimeError("тишина с банком " + os.path.basename(sf))
+            except Exception as e:   # нехватка памяти, сбой, слишком долго: другой способ, потом следующий банк
+                last_err = e
     raise RuntimeError("Не удалось сделать звук ни с одним банком: %s" % last_err)
 
 

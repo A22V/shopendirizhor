@@ -234,5 +234,15 @@ try:
         print("%-30s пропущено (verovio не установлен)" % "ноты с пометками")
 except Exception:
     print("ноты с пометками FAIL (исключение)"); traceback.print_exc(); failed += 1
+# замер ресурсов сервера (только числа в отчёт, звук не меняет)
+try:
+    import resources
+    _s = resources.snapshot()
+    _t = resources.text({"seconds": 1.0, "peak": _s, "soundfont": "MS Basic"})
+    ok = (_s["peak_main_mb"] or 0) > 0 and "МБ" in _t
+    print("%-30s %s  %s" % ("замер памяти", "OK " if ok else "FAIL", _t))
+    failed += 0 if ok else 1
+except Exception:
+    print("замер памяти FAIL (исключение)"); traceback.print_exc(); failed += 1
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

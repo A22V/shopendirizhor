@@ -25,6 +25,7 @@ import score_fix             # noqa: E402
 import quality_gate          # noqa: E402
 import score_notation        # noqa: E402
 import piano_review          # noqa: E402
+import resources             # noqa: E402
 PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
 LLM_READY = bool(PROVIDER and PROVIDER_KEY and PROVIDER_MODEL)
 
@@ -196,7 +197,14 @@ go = st.button({"Оркестровка (из фортепиано)": "Созд�
 def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=None, perc=False, work=None):
     """Runs the full pipeline in a private temporary folder and returns the list of result files.
     prog: progress.Steps (шаги llm/plan, mp3, review, notes) или None."""
-    step = (lambda k: prog.go(k)) if prog else (lambda k: None)
+    _t0, _mem, _cur = time.time(), {}, [None]
+
+    def step(k):                                      # шаг: экран/файл задания + замер памяти в конце прошлого шага
+        if _cur[0]:
+            _mem[_cur[0]] = resources.snapshot()
+        _cur[0] = k
+        if prog:
+            prog.go(k)
     work = work or tempfile.mkdtemp(prefix="shopendirizhor_")
     src = os.path.join(work, "input.mid")
     with open(src, "wb") as f:
@@ -244,12 +252,18 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=
         gate = {"error": traceback.format_exc(limit=3)}
     step("notes")
     score_notation.build(review, stem + ".musicxml", stem + ".mid")   # ноты с пометками; ошибка пишется в review["notation_error"]
+    if _cur[0]:
+        _mem[_cur[0]] = resources.snapshot()
     if prog:                                          # фактическое время шагов: в отчёт (и в ZIP), для уточнения счётчика
         report["timings_s"] = prog.finish()
-        try:
-            json.dump(report, open(stem + "_report.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+    # замер ресурсов сервера (2026-11-07): время, память по шагам, каким банком сделан звук. Звук не меняет.
+    report["resources"] = {"seconds": round(time.time() - _t0, 1), "memory_after_step": _mem,
+                           "peak": resources.snapshot(),
+                           "soundfont": os.path.splitext(os.path.basename(audio_tools.LAST_SOUNDFONT or ""))[0] or None}
+    try:
+        json.dump(report, open(stem + "_report.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    except Exception:
+        pass
     return {"work": work, "stem": stem, "plan": plan, "report": report, "issues": issues, "llm_log": llm_log,
             "mp3": mp3, "name": os.path.splitext(name)[0], "review": review, "gate": gate}
 
@@ -643,6 +657,15 @@ if res:
                        "" if "MS Basic" in _sf else " (маленький набор: звучит проще, чем в MuseScore)"))
     else:
         st.info("Звуковая запись сейчас недоступна на сервере. Скачайте MIDI и откройте его в программе для музыки.")
+    _rs = (res.get("report") or {}).get("resources")
+    if _rs:
+        with st.expander("Ресурсы сервера (время и память)"):
+            st.write(resources.text(_rs) + ".")
+            _tm = (res.get("report") or {}).get("timings_s") or {}
+            for _k, _v in (_rs.get("memory_after_step") or {}).items():
+                st.write("• шаг «%s»: %s с, память приложения после шага %s МБ" % (
+                    _k, _tm.get(_k, "?"), _v.get("rss_mb", "?")))
+            st.caption("Цифры для вопроса «хватает ли облаку памяти». Они же лежат в report.json внутри ZIP.")
 
     if res.get("llm_log"):
         _pi = (res.get("report") or {}).get("planner") or {}
