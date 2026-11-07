@@ -207,3 +207,57 @@ def fill_winds(plan):
             ph[role] = list(ph[role]) + [[w, 0, None, None]]
             changes.append("такты %d–%d: %s добавлен(а) к голосу %s" % (ph["bars"][0], ph["bars"][1], WIND_RU[w], role))
     return plan, changes
+
+
+# ---------------------------------------------------------------------------
+# Полный состав в бедных фразах (ORCH_FULL=1, по умолчанию выключено). Добавлено 2026-11-07.
+# Случай: DeepSeek Flash на пьесе пользователя (53 такта, 2026-11-07) почти всю пьесу отдал трём инструментам
+# (скрипка I — мелодия, скрипка II — сопровождение, фагот — бас), альт и виолончель молчали всю пьесу.
+# ORCH_WINDS и ORCH_BASS не сработали: каждый духовой и контрабас появились хотя бы в одной фразе.
+# Правило (всё эвристика, в книгах не найдено; проверяется на слух парой A/B):
+#   * трогаем только фразу, где занято меньше FULL_MIN инструментов;
+#   * новых нот не придумываем: добавленные инструменты играют голоса самого фортепиано —
+#     пустой первый внутренний голос получает альт (если занят — кларнет), пустой второй — валторна
+#     (держит гармонию: Черни, Op. 600, т. 3, с. 28); бас удваивают виолончель и контрабас, если их во фразе нет;
+#   * внутренние голоса есть только там, где у фортепиано звучат средние ноты аккорда; где их нет, инструмент молчит;
+#   * больше 8 инструментов (порог «стены», ORCH_THIN) и 4 духовых (K3 рецензента) не добавляем.
+# ---------------------------------------------------------------------------
+FULL_MIN = 5             # эвристика: фраза из 4 и меньше инструментов считается бедной
+FULL_INNER = {"inner1": ("Viola", "Clarinet"), "inner2": ("Horn", "Viola", "Clarinet")}
+FULL_RU = {"Viola": "альт", "Clarinet": "кларнет", "Horn": "валторна", "Cello": "виолончель", "Double Bass": "контрабас"}
+
+
+def full_enabled():
+    return os.environ.get("ORCH_FULL", "") not in ("", "0", "false", "False")
+
+
+def fill_core(plan):
+    """Возвращает (новый_план, список_изменений по-русски). Исходный план не меняется."""
+    plan = copy.deepcopy(plan)
+    changes = []
+    for ph in plan.get("phrases", []):
+        if len(_used(ph)) >= FULL_MIN:
+            continue
+        added = []
+
+        def room(name):
+            used = _used(ph)
+            if name in used or len(used) >= THIN_MIN:
+                return False
+            return name not in WINDS or sum(1 for n in used if n in WINDS) < WINDS_MAX
+
+        for role, cands in FULL_INNER.items():
+            if ph.get(role):
+                continue
+            who = next((c for c in cands if room(c)), None)
+            if who:
+                ph[role] = [[who, 0, None, None]]
+                added.append("%s — %s голос" % (FULL_RU[who], "первый внутренний" if role == "inner1" else "второй внутренний"))
+        if ph.get("bass"):
+            for who in ("Cello", "Double Bass"):
+                if room(who):
+                    ph["bass"] = list(ph["bass"]) + [[who, 0, None, None]]
+                    added.append("%s — бас" % FULL_RU[who])
+        if added:
+            changes.append("такты %d–%d: %s" % (ph["bars"][0], ph["bars"][1], ", ".join(added)))
+    return plan, changes
