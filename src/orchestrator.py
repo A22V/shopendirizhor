@@ -391,7 +391,7 @@ def realize(s, events, melody, meta, plan):
         a_, b_ = ph["bars"]
         pos = (bi - (a_ - 1)) / (b_ - a_ + 1)
         for spec in ph.get(role, []):
-            name, shift = spec[0], spec[1]
+            name, shift = spec[0], semitones(spec[1])
             if len(spec) > 2 and spec[2] is not None and pos < spec[2] - 1e-9: continue
             if len(spec) > 3 and spec[3] is not None and pos >= spec[3] - 1e-9: continue
             fitted = fit(midi + shift, name)
@@ -458,6 +458,21 @@ def add_dynamics(score, dyn_by_bar):
 
 LEVEL_VEL = {"mp": 64, "mf": 80, "f": 96}
 ROLE_VEL = {"melody": 14, "inner1": -14, "inner2": -14, "bass": -6, "figuration": -10}   # melody above accompaniment
+
+def semitones(shift):
+    """Сдвиг из плана -> полутоны. Сдвиг в плане задаётся в ПОЛУТОНАХ, кратных 12 (12 = на октаву вверх).
+    Ошибка 2026-11-07: DeepSeek написал 1 и 2, имея в виду октавы, а программа сдвинула мелодию на 1-2 полутона:
+    скрипка I играла на полтона/тон выше гармонии (фальшь в 179 из 292 нот). Теперь сдвиг, не кратный 12,
+    считается числом октав (|1..3|) или округляется до ближайшей октавы: на полутон мелодию не сдвигаем никогда."""
+    if not shift:
+        return 0
+    shift = int(round(float(shift)))
+    if shift % 12 == 0:
+        return shift
+    if abs(shift) <= 3:
+        return 12 * shift
+    return 12 * int(round(shift / 12.0))
+
 
 def build_score(s, lines, dyn, piano_mode="off", meta=None):
     starts = [b[0] for b in meta["bars"]]

@@ -155,8 +155,10 @@ def describe_piece(meta, melody, events, n_bars):
          "Double Bass": [31, 67]}))
     lines.append("Answer format: {\"phrases\": [{\"id\":1,\"bars\":[1,4],\"kind\":\"lyric|figuration|run|intro\","
                  "\"climax\":false,\"color\":\"...\",\"level\":\"mp|mf|f\","
-                 "\"melody\":[[\"Instrument\",octave_shift,from_share?,until_share?]],"
+                 "\"melody\":[[\"Instrument\",shift_in_semitones,from_share?,until_share?]],"
                  "\"inner1\":[...],\"inner2\":[...],\"bass\":[...],\"figuration\":[...],\"why\":[\"...\"]}]}")
+    lines.append("shift_in_semitones must be a multiple of 12: 0 = as written, 12 = one octave up, -12 = one octave down. "
+                 "Never 1, 2 or any other value: the melody would be out of tune with the harmony.")
     return "\n".join(lines)
 
 
