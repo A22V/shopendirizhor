@@ -135,6 +135,26 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("бегущее сопровождение FAIL (исключение)"); traceback.print_exc(); failed += 1
+# контроль брака (quality_gate): своя оркестровка без фальши; та же партия на полтона выше -> брак Б1;
+# сдвиг из плана модели (1 = октава) никогда не даёт полутон (ошибка 2026-11-07)
+try:
+    import quality_gate, mido as _mido
+    _src = os.path.join(ROOT, "input", "k545_piano_excerpt.mid")
+    g1 = quality_gate.check(_src, stem + ".mid")
+    _m = _mido.MidiFile(stem + ".mid")
+    _tr = next(t for t in _m.tracks if any(x.type == "note_on" for x in t))
+    for x in _tr:
+        if x.type in ("note_on", "note_off"):
+            x.note = min(127, x.note + 1)
+    _bad = os.path.join(outdir, "k545_semitone.mid"); _m.save(_bad)
+    g2 = quality_gate.check(_src, _bad)
+    ok = (g1["stats"]["foreign"]["bad"] == 0 and any(c == "Б1" for c, _, _ in g2["defects"])
+          and [orchestrator.semitones(x) for x in (0, 1, 2, -1, 12, -12, 24, 7)] == [0, 12, 24, -12, 12, -12, 24, 12])
+    print("%-30s %s  чужих нот: своя %d, испорченная %d" % ("контроль брака", "OK " if ok else "FAIL",
+          g1["stats"]["foreign"]["bad"], g2["stats"]["foreign"]["bad"]))
+    failed += 0 if ok else 1
+except Exception:
+    print("контроль брака FAIL (исключение)"); traceback.print_exc(); failed += 1
 # ноты с пометками (нужен verovio; без него проверка пропускается)
 try:
     import score_notation

@@ -22,6 +22,7 @@ import llm_planner           # noqa: E402
 import reduction             # noqa: E402
 import score_review          # noqa: E402
 import score_fix             # noqa: E402
+import quality_gate          # noqa: E402
 import score_notation        # noqa: E402
 import piano_review          # noqa: E402
 PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
@@ -213,6 +214,13 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None):
         review = score_review.review(stem + ".mid", stem + ".musicxml")
     except Exception:
         review = None
+    try:                                              # контроль брака: сравнение с оригиналом, звук не меняет
+        gate = quality_gate.check(src, stem + ".mid")
+        report["quality_gate"] = {"ok": gate["ok"], "defects": gate["defects"], "warnings": gate["warnings"],
+                                  "stats": gate["stats"]}
+        json.dump(report, open(stem + "_report.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    except Exception:
+        gate = {"error": traceback.format_exc(limit=3)}
     step("notes")
     score_notation.build(review, stem + ".musicxml", stem + ".mid")   # ноты с пометками; ошибка пишется в review["notation_error"]
     if prog:                                          # фактическое время шагов: в отчёт (и в ZIP), для уточнения счётчика
@@ -222,7 +230,30 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None):
         except Exception:
             pass
     return {"work": work, "stem": stem, "plan": plan, "report": report, "issues": issues, "llm_log": llm_log,
-            "mp3": mp3, "name": os.path.splitext(name)[0], "review": review}
+            "mp3": mp3, "name": os.path.splitext(name)[0], "review": review, "gate": gate}
+
+
+def show_gate(gate):
+    """Контроль брака (src/quality_gate.py): объективные ошибки по сравнению с оригиналом. Ошибку не прячет."""
+    st.markdown("#### Контроль брака")
+    if not gate:
+        return
+    if gate.get("error"):
+        st.warning("Контроль брака не выполнился. Причина ниже.")
+        with st.expander("Подробности для разработчика"):
+            st.code(gate["error"])
+        return
+    if gate["ok"]:
+        st.success("Брака не найдено: нет фальшивых нот, мелодия на месте и не скачет, играют все инструменты.")
+    else:
+        st.error("Есть брак (%d). Такую оркестровку не стоит показывать как готовую." % len(gate["defects"]))
+    for code, text, status in gate["defects"]:
+        st.markdown("**[%s]** %s" % (code, text))
+        st.caption("Статус: " + status)
+    for code, text, status in gate["warnings"]:
+        st.markdown("**[%s, предупреждение]** %s" % (code, text))
+        st.caption("Статус: " + status)
+    st.caption("Контроль считает, а не слушает: «брака нет» не значит «звучит хорошо». Судья звучания — слушатель.")
 
 
 def show_review(review, expanded=True):
@@ -504,6 +535,7 @@ if res:
     issues = res["issues"]
     errors = [i for i in issues if i[0] == "error"]
     warns = [i for i in issues if i[0] == "warning"]
+    show_gate(res.get("gate"))
     if errors:
         st.error("Найдены серьёзные ошибки: %d. Результат не рекомендуется использовать." % len(errors))
     elif warns:
@@ -531,6 +563,9 @@ if res:
     st.markdown("#### Скачать")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        _g = res.get("gate") or {}
+        z.writestr(res["name"] + "_контроль_брака.txt",
+                   quality_gate.text(_g) if "ok" in _g else "Контроль брака не выполнился:\n" + str(_g.get("error")))
         for ext in (".mid", ".musicxml", "_plan.json", "_report.json"):
             p = res["stem"] + ext
             if os.path.exists(p):

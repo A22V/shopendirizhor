@@ -1,2 +1,5 @@
 out/
 __pycache__/
+
+# набор пьес для tests/quality_suite.py (права на MIDI неясны)
+tests/pieces/
