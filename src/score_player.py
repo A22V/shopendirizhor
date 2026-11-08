@@ -323,8 +323,14 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
         except Exception:
             ok = False
         if not ok:
-            raise ValueError("verovio не смог прочитать ноты (начало файла: %r, размер %d байт): %s"
-                             % (notation_xml[:80], len(notation_xml), (tk.getLog() or "")[-300:]))
+            why = ("verovio не принял ноты (начало файла: %r, размер %d байт): %s"
+                   % (notation_xml[:80], len(notation_xml), (tk.getLog() or "")[-300:]))
+            return {"parts": [{k: p.get(k) for k in ("key", "label", "source", "channels")} for p in parts],
+                    "pages": [], "timemap": [], "tempo": tempo_map(mido.MidiFile(file=io.BytesIO(sound))),
+                    "meter": meter_map(mido.MidiFile(file=io.BytesIO(sound))),
+                    "length": mido.MidiFile(file=io.BytesIO(sound)).length, "sound": sound,
+                    "notes": notes + ["Ноты на экране показать не удалось, но играть файл можно. " + why], "name": name,
+                    "notation_error": why}
     pages = [tk.renderToSVG(i) for i in range(1, tk.getPageCount() + 1)]
     tm = tk.renderToTimemap({"includeMeasures": True, "includeRests": False})
     timemap = [{"q": e.get("qstamp", 0.0), "on": e.get("on", []), "off": e.get("off", []),
