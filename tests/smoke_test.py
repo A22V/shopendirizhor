@@ -225,6 +225,16 @@ try:
     _md = os.path.join(ROOT, "web", "mic_recorder")
     ok = ok and all(os.path.getsize(os.path.join(_md, f)) > 100000 for f in
                     ("basic_pitch.min.js", "basic_pitch_model/model.json", "basic_pitch_model/group1-shard1of1.bin"))
+    # режим «несколько нот сразу»: аккорд сохраняется, октава не сдвигается
+    _P = [[0.0, 1.0, 48, 90], [0.0, 1.0, 52, 90], [0.0, 1.0, 55, 90], [1.0, 0.5, 60, 90]]
+    _dp, _ip = melody_midi.notes_to_midi(_P, 80, "нет", "авто", poly=True)
+    _mp = _mido.MidiFile(file=_io.BytesIO(_dp)); _tp = 0; _at0 = []
+    for _x in _mp.tracks[1]:
+        _tp += _x.time
+        if _x.type == "note_on" and _x.velocity > 0 and _tp == 0:
+            _at0.append(_x.note)
+    ok = ok and sorted(_at0) == [48, 52, 55] and _ip["octave_shift"] == 0 and _ip["poly"] and _ip["notes"] == 4
+    ok = ok and "bpp" in _mh and "poly:" in _mh
     print("%-30s %s" % ("напетая мелодия → MIDI", "OK " if ok else "FAIL"))
     failed += 0 if ok else 1
 except Exception:

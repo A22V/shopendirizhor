@@ -30,7 +30,7 @@ def record(key="mic"):
     if v and (cur is None or cur.nonce != v.get("nonce")):
         try:
             data, info = melody_midi.notes_to_midi(v.get("notes") or [], v.get("tempo", 80), v.get("grid", "восьмые"),
-                                                   v.get("octave", "авто"))
+                                                   v.get("octave", "авто"), poly=bool(v.get("poly")))
         except Exception as e:
             st.error("Мелодию не удалось записать в MIDI: %s" % e)
             return cur
@@ -41,9 +41,13 @@ def record(key="mic"):
         st.rerun()                                     # сообщаем браузеру «получено»
     if cur is not None:
         i = cur.info
-        st.caption("🎤 Напетая мелодия: %d нот, темп %d, ритм — %s, сдвиг %+d окт. Это одна строчка без аккордов: "
-                   "оркестр сыграет её почти в унисон (аккорды и бас — следующий этап)."
-                   % (i["notes"], i["tempo"], i["grid"], i["octave_shift"]))
+        if i.get("poly"):
+            st.caption("🎤 Записанная музыка: %d нот (в том числе одновременные), ритм — %s, сдвиг %+d окт."
+                       % (i["notes"], i["grid"], i["octave_shift"]))
+        else:
+            st.caption("🎤 Напетая мелодия: %d нот, темп %d, ритм — %s, сдвиг %+d окт. Это одна строчка без аккордов: "
+                       "оркестр сыграет её почти в унисон (аккорды и бас — следующий этап)."
+                       % (i["notes"], i["tempo"], i["grid"], i["octave_shift"]))
         st.download_button("⬇ Скачать напетую мелодию (MIDI)", cur.getvalue(), file_name=cur.name,
                            mime="audio/midi", key=key + "_dl")
     return cur

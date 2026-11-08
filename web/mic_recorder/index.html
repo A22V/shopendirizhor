@@ -26,7 +26,7 @@ canvas{width:100%;height:150px;background:#fff;border:1px solid #e3d5b5;border-r
   <div class="row">
     <label>Темп <input id="tempo" type="number" min="40" max="200" value="80"> уд/мин</label>
     <label>Ритм <select id="grid"><option>восьмые</option><option>шестнадцатые</option><option>нет</option></select></label>
-    <label>Распознаватель <select id="eng"><option value="bp">нейросеть Basic Pitch (Spotify)</option><option value="yin">простой (YIN)</option></select></label>
+    <label>Распознаватель <select id="eng"><option value="bp">нейросеть Basic Pitch (Spotify)</option><option value="bpp">нейросеть Basic Pitch — несколько нот сразу (музыка, рояль)</option><option value="yin">простой (YIN)</option></select></label>
     <label>Октава <select id="oct"><option value="авто">авто</option><option value="-2">−2</option><option value="-1">−1</option><option value="0">как спето</option><option value="1">+1</option><option value="2">+2</option></select></label>
   </div>
   <div class="row">
@@ -144,11 +144,15 @@ let LAST = null;
 function runAnalysis() {
   if (!LAST) return;
   const eng = $("eng").value;
-  status(eng === "bp" ? "Распознаю нейросетью (первый раз загружается около 2 МБ)…" : "Распознаю ноты…");
-  const job = eng === "bp" ? analyseBP(LAST.x, LAST.sr) : analyse(LAST.x, LAST.sr);
+  const isBP = eng === "bp" || eng === "bpp";
+  status(isBP ? "Распознаю нейросетью (первый раз загружается около 2 МБ)…" : "Распознаю ноты…");
+  const job = isBP ? analyseBP(LAST.x, LAST.sr, eng === "bpp") : analyse(LAST.x, LAST.sr);
   setTimeout(() => job.then(show).catch(err => status("Ошибка распознавания: " + (err && err.message ? err.message : err), "bad")), 30);
 }
-$("eng").onchange = () => { if (LAST) runAnalysis(); };     // переключили распознаватель — та же запись заново
+$("eng").onchange = () => {
+  if ($("eng").value === "bpp") { $("grid").value = "нет"; $("oct").value = "0"; }     // музыка: ритм и октаву не трогаем
+  if (LAST) runAnalysis();
+};     // переключили распознаватель — та же запись заново
 
 async function resample(x, sr, to) {
   const len = Math.ceil(x.length * to / sr);
@@ -161,7 +165,7 @@ async function resample(x, sr, to) {
 // Нейросеть Basic Pitch (Spotify, Apache-2.0; Bittner et al., ICASSP 2022). Работает в браузере (TensorFlow.js).
 let BP_MODEL = null;
 function loadScript(url) { return new Promise((ok, bad) => { const sc = document.createElement("script"); sc.src = url; sc.onload = ok; sc.onerror = () => bad(new Error("не загрузился " + url)); document.head.appendChild(sc); }); }
-async function analyseBP(x, sr) {
+async function analyseBP(x, sr, poly) {
   if (!window.BP) await loadScript("basic_pitch.min.js");
   if (!BP_MODEL) BP_MODEL = new BP.BasicPitch("basic_pitch_model/model.json");
   const y = await resample(x, sr, 22050);                         // модель работает на 22 050 Гц
@@ -172,6 +176,10 @@ async function analyseBP(x, sr) {
   const ev = BP.noteFramesToTime(BP.addPitchBendsToNoteEvents(contours,
                BP.outputToNotesPoly(frames, onsets, 0.5, 0.3, 11, true, null, null, true)));
   let notes = ev.map(n => [n.startTimeSeconds, n.durationSeconds, n.pitchMidi, n.amplitude]).sort((a, b) => a[0] - b[0]);
+  if (poly) {          // музыка с несколькими нотами сразу: ничего не сводим в одну линию
+    const amx = Math.max(...notes.map(n => n[3]), 1e-6);
+    return {notes: notes.map(n => [+n[0].toFixed(3), +n[1].toFixed(3), n[2], Math.round(45 + 65 * n[3] / amx)]), engine: "bpp"};
+  }
   // голос один: из наложившихся нот оставляем более громкую (эвристика)
   const mono = [];
   for (const n of notes) {
@@ -352,7 +360,7 @@ function sendNow() {
 $("send").onclick = () => {
   if (!NOTES) return;
   SENT = {nonce: Date.now() + "-" + Math.random().toString(36).slice(2), notes: NOTES,
-          tempo: Math.max(40, Math.min(200, +$("tempo").value || 80)), grid: $("grid").value, octave: $("oct").value};
+          tempo: Math.max(40, Math.min(200, +$("tempo").value || 80)), grid: $("grid").value, octave: $("oct").value, poly: $("eng").value === "bpp"};
   sendTries = 0;
   status("Передаю мелодию программе…");
   sendNow();
