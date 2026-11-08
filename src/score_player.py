@@ -30,8 +30,8 @@ INSTRUMENTS = [
     ("percussion", "Ударные", 31, r"percussion|drum|ударн|барабан", []),
     ("harp", "Арфа", 40, r"harp|arpa|harfe|арф", [46]),
     ("piano", "Фортепиано", 41, r"piano|klavier|pianoforte|фортепиан|рояль|right hand|left hand|рука", list(range(0, 8))),
-    ("organ", "Орган", 42, r"organ|orgel|орган", list(range(16, 24))),
-    ("accordion", "Аккордеон", 43, r"accordion|akkordeon|аккорде|баян", [21, 23]),
+    ("organ", "Орган", 42, r"organ|orgel|орган", list(range(16, 21))),
+    ("accordion", "Аккордеон", 43, r"accordion|akkordeon|аккорде|баян|garmon|harmon|гармон", [21, 22, 23]),
     ("guitar", "Гитара", 44, r"guitar|gitarre|гитар", list(range(24, 32))),
     ("violin", "Скрипка", 50, r"violin|violino|violine|geige|скрипк|\bvln?\b|\bvl\.?\s*i", [40]),
     ("viola", "Альт", 52, r"viola|bratsche|альт|\bvla\b", [41]),
@@ -305,6 +305,13 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
         notes.append("Ноты сделаны из MIDI: ритм выровнен по долям приблизительно (как в MuseScore при открытии MIDI).")
     if is_musicxml(data, name):
         parts = _number(parts)
+    _pr = {}                                    # номер инструмента (GM, с 0) по каналу: для проверки банка в проигрывателе
+    for _t in mido.MidiFile(file=io.BytesIO(sound)).tracks:
+        for _m in _t:
+            if _m.type == "program_change" and _m.channel not in _pr:
+                _pr[_m.channel] = _m.program
+    for _p in parts:
+        _p["program"] = next((_pr[c] for c in (_p.get("channels") or []) if c in _pr), None)
     import verovio
     tk = verovio.toolkit()
     tk.setOptions({"pageWidth": page_width, "pageHeight": 60000, "scale": scale, "adjustPageHeight": True,
@@ -325,7 +332,7 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
         if not ok:
             why = ("verovio не принял ноты (начало файла: %r, размер %d байт): %s"
                    % (notation_xml[:80], len(notation_xml), (tk.getLog() or "")[-300:]))
-            return {"parts": [{k: p.get(k) for k in ("key", "label", "source", "channels")} for p in parts],
+            return {"parts": [{k: p.get(k) for k in ("key", "label", "source", "channels", "program")} for p in parts],
                     "pages": [], "timemap": [], "tempo": tempo_map(mido.MidiFile(file=io.BytesIO(sound))),
                     "meter": meter_map(mido.MidiFile(file=io.BytesIO(sound))),
                     "length": mido.MidiFile(file=io.BytesIO(sound)).length, "sound": sound,
@@ -336,7 +343,7 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
     timemap = [{"q": e.get("qstamp", 0.0), "on": e.get("on", []), "off": e.get("off", []),
                 "m": e.get("measureOn")} for e in tm]
     smid = mido.MidiFile(file=io.BytesIO(sound))
-    return {"parts": [{k: p.get(k) for k in ("key", "label", "source", "channels")} for p in parts],
+    return {"parts": [{k: p.get(k) for k in ("key", "label", "source", "channels", "program")} for p in parts],
             "pages": pages, "timemap": timemap, "tempo": tempo_map(smid), "meter": meter_map(smid), "length": smid.length,
             "sound": sound, "notes": notes, "name": name}
 

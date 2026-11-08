@@ -70,6 +70,7 @@ button.on{background:#1f5fbf;color:#fff;border-color:#1f5fbf}
     <label class="small"><input id="follow" type="checkbox" checked> листать за музыкой</label>
     <button id="metro" type="button" title="Щелчок на каждую долю, на первую долю такта — выше">🕰 Метроном: выкл</button>
   </div>
+  <div id="presets" style="font-size:.85rem;color:#6b5a3e;margin:.3rem 0"></div>
   <div id="status">Нажмите «Играть»: загрузится банк звуков.</div>
   <div id="prog"><div></div></div>
   <div id="parts"></div>
@@ -163,11 +164,26 @@ async function start() {
     P.seq.playbackRate = +$("rate").value;
     P.ready = true; apply();
     st("Готово. Банк: " + P.bank + ".");
+    try { checkPresets(); } catch (e) {}
     ["play", "stop", "seek"].forEach(id => $(id).disabled = false);
     requestAnimationFrame(tick);
   } catch (e) {
     st("Не получилось запустить звук: " + (e && e.message ? e.message : e)); $("play").disabled = false;
   } finally { P.loading = false; }
+}
+
+// Есть ли в банке нужный инструмент? Если нет, синтезатор берёт запасной (обычно рояль): так бывает с банками,
+// где только оркестр (например, Aegean): гармони, гитары, органа в них нет.
+function checkPresets() {
+  const list = P.synth.presetList || [];
+  const out = [];
+  D.parts.forEach(p => {
+    if (p.program == null || (p.channels || []).includes(9)) return;
+    const hit = list.find(x => x.program === p.program && (x.bankMSB || 0) === 0 && !x.isGMGSDrum);
+    out.push(p.label + " (№" + (p.program + 1) + ") — " + (hit ? "в банке «" + hit.name + "»" : "в банке НЕТ такого инструмента, играет запасной"));
+  });
+  const box = document.getElementById("presets");
+  if (box) box.textContent = "Что играет в банке: " + out.join("; ") + ". В банке всего инструментов: " + list.length + ".";
 }
 
 $("play").onclick = async () => {
