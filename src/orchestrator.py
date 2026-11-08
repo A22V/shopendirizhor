@@ -58,7 +58,14 @@ def analyze(path):
     allnotes = []
     for pi, p in enumerate(s.parts):
         for el in p.flatten().notes:
-            for pt in (el.pitches if isinstance(el, chord.Chord) else [el.pitch]):
+            # ударные (Unpitched, аккорды ударных) без высоты: в анализ не идут
+            if isinstance(el, chord.Chord):
+                pts = el.pitches
+            elif isinstance(el, note.Note):
+                pts = [el.pitch]
+            else:
+                continue
+            for pt in pts:
                 if el.quarterLength > 0:
                     allnotes.append((float(el.offset), float(el.offset + el.quarterLength), pt.midi, pi))
     total = max(n[1] for n in allnotes)

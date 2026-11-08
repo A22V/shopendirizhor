@@ -13,7 +13,7 @@ ROOT = os.path.dirname(WEB)
 for p in (os.path.join(ROOT, "src"), WEB):
     if p not in sys.path:
         sys.path.insert(0, p)
-import score_player, player_html, jobs, midi_repair   # noqa: E402
+import score_player, player_html, jobs, midi_repair, picker   # noqa: E402
 
 st.set_page_config(page_title="Проигрыватель партитуры", page_icon="🎼", layout="wide")
 st.markdown("""<style>
@@ -54,8 +54,10 @@ def _from_job():
 components.html(player_html.bank_panel(), height=170)
 
 src = _from_job()
-up = st.file_uploader("Открыть файл: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ",
-                      key="player_file")
+up = picker.pick("Открыть файл: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ", "player_pick")
+with st.expander("Запасная кнопка загрузки (если основная не сработала)"):
+    _native = st.file_uploader("Обычная загрузка Streamlit", key="player_file")
+up = up or _native
 if up is not None:
     data = up.getvalue()
     if len(data) > MAX_MB * 1024 * 1024:

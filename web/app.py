@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import theme                 # noqa: E402
 import progress
 import jobs              # noqa: E402
+import picker            # noqa: E402  своя кнопка выбора файла (веб-сокет вместо канала загрузки)
 st.markdown(theme.CSS(), unsafe_allow_html=True)
 _first_visit = not st.session_state.get("bq_opened")     # занавес раздвигается только при первом входе
 st.session_state["bq_opened"] = True
@@ -125,7 +126,15 @@ def checked_midi(f, what="Файл"):
     return _Upload(stem + ".mid", midi)
 
 
-up = checked_midi(st.file_uploader("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl)", accept_multiple_files=False))
+def any_file(label, key):
+    """Файл из своей кнопки (основной путь) или из штатной загрузки Streamlit (запасной путь)."""
+    f = picker.pick(label, key)
+    with st.expander("Запасная кнопка загрузки (если основная не сработала)"):
+        g = st.file_uploader("Обычная загрузка Streamlit", accept_multiple_files=False, key=key + "_native")
+    return f or g
+
+
+up = checked_midi(any_file("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ", "piece"))
 
 
 def source_mp3(data: bytes):
@@ -201,8 +210,7 @@ orig_up = None
 if mode == PIANO_REVIEW_MODE:
     st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
                "сколько гармонии оркестра сохранилось в переложении.")
-    orig_up = checked_midi(st.file_uploader("Оркестровый оригинал (необязательно, MIDI или MusicXML)", accept_multiple_files=False,
-                                            key="orig_up"), "Оригинал")
+    orig_up = checked_midi(any_file("Оркестровый оригинал (необязательно, MIDI или MusicXML)", "orig_up"), "Оригинал")
 go = st.button({"Оркестровка (из фортепиано)": "Создать оркестровку", REVIEW_MODE: "Проверить партитуру",
                 PIANO_REVIEW_MODE: "Проверить переложение"}.get(mode, "Создать переложение"),
                disabled=up is None, use_container_width=True)

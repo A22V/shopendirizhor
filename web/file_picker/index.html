@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+/* Своя кнопка выбора файла (2026-11-08). Файл читается в браузере и уходит в программу по тому же каналу,
+   что и все нажатия (веб-сокет), а не по отдельному каналу загрузки Streamlit, который на телефоне молча отказывал. */
+html,body{margin:0;padding:0;background:transparent;font-family:Georgia,"Times New Roman",serif;color:#2b1d0e}
+.lbl{font-size:15px;margin:0 0 6px}
+.box{border:1.5px dashed #b08a3e;border-radius:10px;background:#f6ecd6;padding:10px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+button{font:inherit;font-size:16px;padding:9px 16px;border-radius:9px;border:1.5px solid #8e1426;background:#8e1426;color:#fff;cursor:pointer}
+button:active{transform:translateY(1px)}
+button.sec{background:#fff;color:#8e1426}
+.st{font-size:14px;color:#5a4528;flex:1 1 180px;word-break:break-word}
+.ok{color:#1d6b2f}.bad{color:#a01818}
+input{display:none}
+</style></head><body>
+<div class="lbl" id="lbl"></div>
+<div class="box">
+  <button id="btn" type="button">📂 Выбрать файл</button>
+  <button id="clr" type="button" class="sec" style="display:none">✕ Убрать</button>
+  <div class="st" id="st">Файл не выбран.</div>
+</div>
+<input id="inp" type="file">
+<script>
+const $ = id => document.getElementById(id);
+let ARGS = {}, sent = null, cleared = false;
+function send(type, extra) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, extra || {}), "*"); }
+function height() { send("streamlit:setFrameHeight", {height: document.body.scrollHeight + 4}); }
+function setValue(v) { send("streamlit:setComponentValue", {value: v, dataType: "json"}); }
+function status(t, cls) { const s = $("st"); s.textContent = t; s.className = "st " + (cls || ""); height(); }
+const kb = n => n < 1024 * 1024 ? (n / 1024).toFixed(1) + " КБ" : (n / 1048576).toFixed(2) + " МБ";
+
+window.addEventListener("message", e => {
+  const d = e.data || {};
+  if (d.type !== "streamlit:render") return;
+  ARGS = d.args || {};
+  $("lbl").textContent = ARGS.label || "";
+  $("lbl").style.display = ARGS.label ? "" : "none";
+  const cur = ARGS.current;           // имя уже принятого файла (после перезапуска страницы)
+  if (cur && !sent && !cleared) { status("✔ Принят: " + cur, "ok"); $("clr").style.display = ""; }
+  height();
+});
+
+$("btn").onclick = () => { $("inp").value = ""; $("inp").click(); };
+$("clr").onclick = () => { sent = null; cleared = true; setValue(null); $("clr").style.display = "none"; status("Файл не выбран."); };
+$("inp").onchange = async () => {
+  const f = $("inp").files && $("inp").files[0];
+  if (!f) return;
+  const max = (ARGS.max_mb || 5) * 1048576;
+  if (f.size > max) { status("«" + f.name + "»: " + kb(f.size) + " — больше " + (ARGS.max_mb || 5) + " МБ.", "bad"); return; }
+  if (f.size === 0) { status("«" + f.name + "»: файл пустой (0 байт). Если он в облаке (Google Диск), сначала скачайте его на телефон.", "bad"); return; }
+  status("Читаю «" + f.name + "»…");
+  try {
+    const buf = new Uint8Array(await f.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+    const b64 = btoa(bin);
+    cleared = false;
+    sent = {name: f.name, size: f.size, b64: b64, nonce: Date.now() + "-" + Math.random().toString(36).slice(2)};
+    setValue(sent);
+    $("clr").style.display = "";
+    status("✔ Принят: " + f.name + " (" + kb(f.size) + ")", "ok");
+  } catch (err) {
+    status("Не удалось прочитать файл: " + (err && err.message ? err.message : err), "bad");
+  }
+};
+send("streamlit:componentReady", {apiVersion: 1});
+window.addEventListener("load", height);
+</script></body></html>

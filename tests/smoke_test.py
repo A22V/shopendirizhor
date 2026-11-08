@@ -190,6 +190,21 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("лёгкие ударные FAIL (исключение)"); traceback.print_exc(); failed += 1
+# своя кнопка выбора файла (web/picker.py + web/file_picker/index.html): файл по веб-сокету, а не каналом загрузки
+try:
+    _ph = open(os.path.join(ROOT, "web", "file_picker", "index.html"), encoding="utf-8").read()
+    ok = all(k in _ph for k in ("streamlit:componentReady", "streamlit:setComponentValue", "streamlit:setFrameHeight",
+                                 'type="file"', "btoa"))
+    ok = ok and 'accept=' not in _ph                       # без фильтра: на Android фильтр делает файлы серыми
+    _pp = open(os.path.join(ROOT, "web", "picker.py"), encoding="utf-8").read()
+    ok = ok and "declare_component" in _pp and "b64decode" in _pp
+    _app = open(os.path.join(ROOT, "web", "app.py"), encoding="utf-8").read()
+    _pl = open(os.path.join(ROOT, "web", "pages", "1_Проигрыватель.py"), encoding="utf-8").read()
+    ok = ok and "picker.pick" in _app and "picker.pick" in _pl
+    print("%-30s %s" % ("своя кнопка выбора файла", "OK " if ok else "FAIL"))
+    failed += 0 if ok else 1
+except Exception:
+    print("своя кнопка выбора файла FAIL (исключение)"); traceback.print_exc(); failed += 1
 # фоновые задания (web/jobs.py): работа идёт без страницы, повторный запуск того же задания не считается заново
 try:
     sys.path.insert(0, os.path.join(ROOT, "web"))
