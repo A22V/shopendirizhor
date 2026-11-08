@@ -221,7 +221,10 @@ try:
     ok = ok and melody_midi.auto_octave([45, 47, 48, 52]) == 1 and _i["notes"] == 5
     _mh = open(os.path.join(ROOT, "web", "mic_recorder", "index.html"), encoding="utf-8").read()
     ok = ok and all(k in _mh for k in ("getUserMedia", "yinFrames", "streamlit:setComponentValue", "OfflineAudioContext",
-                                       "ResizeObserver"))   # высота окошка внутри свёрнутого раздела
+                                       "ResizeObserver", "analyseBP", "basic_pitch_model/model.json"))
+    _md = os.path.join(ROOT, "web", "mic_recorder")
+    ok = ok and all(os.path.getsize(os.path.join(_md, f)) > 100000 for f in
+                    ("basic_pitch.min.js", "basic_pitch_model/model.json", "basic_pitch_model/group1-shard1of1.bin"))
     print("%-30s %s" % ("напетая мелодия → MIDI", "OK " if ok else "FAIL"))
     failed += 0 if ok else 1
 except Exception:

@@ -26,6 +26,7 @@ canvas{width:100%;height:150px;background:#fff;border:1px solid #e3d5b5;border-r
   <div class="row">
     <label>Темп <input id="tempo" type="number" min="40" max="200" value="80"> уд/мин</label>
     <label>Ритм <select id="grid"><option>восьмые</option><option>шестнадцатые</option><option>нет</option></select></label>
+    <label>Распознаватель <select id="eng"><option value="bp">нейросеть Basic Pitch (Spotify)</option><option value="yin">простой (YIN)</option></select></label>
     <label>Октава <select id="oct"><option value="авто">авто</option><option value="-2">−2</option><option value="-1">−1</option><option value="0">как спето</option><option value="1">+1</option><option value="2">+2</option></select></label>
   </div>
   <div class="row">
@@ -42,6 +43,7 @@ canvas{width:100%;height:150px;background:#fff;border:1px solid #e3d5b5;border-r
   <div class="row">
     <button id="play" type="button" class="sec" disabled>▶ Прослушать распознанное</button>
     <button id="send" type="button" disabled>➜ Отправить в программу</button>
+    <button id="wav" type="button" class="sec" disabled>⬇ Скачать запись (WAV)</button>
   </div>
   <div class="hint">Лучше всего распознаётся пение на один слог («ля-ля», «на-на») или свист в тихой комнате.
     Один голос: аккорды не распознаются. До 90 секунд.</div>
@@ -133,11 +135,71 @@ function stopRec() {
   if (n < recSR * 0.5) { status("Запись слишком короткая.", "bad"); return; }
   const all = new Float32Array(n); let o = 0;
   for (const c of chunks) { all.set(c, o); o += c.length; }
-  status("Распознаю ноты…");
-  setTimeout(() => analyse(all, recSR).then(show).catch(err => status("Ошибка распознавания: " + err, "bad")), 30);
+  LAST = {x: all, sr: recSR}; $("wav").disabled = false;
+  runAnalysis();
 }
 
 // ---------- распознавание ----------
+let LAST = null;
+function runAnalysis() {
+  if (!LAST) return;
+  const eng = $("eng").value;
+  status(eng === "bp" ? "Распознаю нейросетью (первый раз загружается около 2 МБ)…" : "Распознаю ноты…");
+  const job = eng === "bp" ? analyseBP(LAST.x, LAST.sr) : analyse(LAST.x, LAST.sr);
+  setTimeout(() => job.then(show).catch(err => status("Ошибка распознавания: " + (err && err.message ? err.message : err), "bad")), 30);
+}
+$("eng").onchange = () => { if (LAST) runAnalysis(); };     // переключили распознаватель — та же запись заново
+
+async function resample(x, sr, to) {
+  const len = Math.ceil(x.length * to / sr);
+  const off = new OfflineAudioContext(1, len, to);
+  const buf = off.createBuffer(1, x.length, sr); buf.copyToChannel(x, 0);
+  const s = off.createBufferSource(); s.buffer = buf; s.connect(off.destination); s.start();
+  return (await off.startRendering()).getChannelData(0);
+}
+
+// Нейросеть Basic Pitch (Spotify, Apache-2.0; Bittner et al., ICASSP 2022). Работает в браузере (TensorFlow.js).
+let BP_MODEL = null;
+function loadScript(url) { return new Promise((ok, bad) => { const sc = document.createElement("script"); sc.src = url; sc.onload = ok; sc.onerror = () => bad(new Error("не загрузился " + url)); document.head.appendChild(sc); }); }
+async function analyseBP(x, sr) {
+  if (!window.BP) await loadScript("basic_pitch.min.js");
+  if (!BP_MODEL) BP_MODEL = new BP.BasicPitch("basic_pitch_model/model.json");
+  const y = await resample(x, sr, 22050);                         // модель работает на 22 050 Гц
+  const frames = [], onsets = [], contours = [];
+  await BP_MODEL.evaluateModel(y, (f, o, c) => { frames.push(...f); onsets.push(...o); contours.push(...c); },
+                               p => status("Распознаю нейросетью… " + Math.round(p * 100) + "%"));
+  // пороги — по умолчанию Python-версии Basic Pitch: начало ноты 0,5, звучание 0,3, нота не короче ~128 мс (11 кадров)
+  const ev = BP.noteFramesToTime(BP.addPitchBendsToNoteEvents(contours,
+               BP.outputToNotesPoly(frames, onsets, 0.5, 0.3, 11, true, null, null, true)));
+  let notes = ev.map(n => [n.startTimeSeconds, n.durationSeconds, n.pitchMidi, n.amplitude]).sort((a, b) => a[0] - b[0]);
+  // голос один: из наложившихся нот оставляем более громкую (эвристика)
+  const mono = [];
+  for (const n of notes) {
+    const last = mono[mono.length - 1];
+    if (last && n[0] < last[0] + last[1] - 0.05) {
+      const ov = Math.min(last[0] + last[1], n[0] + n[1]) - n[0];
+      if (ov > 0.5 * Math.min(last[1], n[1])) { if (n[3] * n[1] > last[3] * last[1]) mono[mono.length - 1] = n; continue; }
+      last[1] = Math.max(0.05, n[0] - last[0]);
+    }
+    mono.push(n.slice());
+  }
+  const amax = Math.max(...mono.map(n => n[3]), 1e-6);
+  return {notes: mono.map(n => [+n[0].toFixed(3), +n[1].toFixed(3), n[2], Math.round(45 + 65 * n[3] / amax)]), engine: "bp"};
+}
+
+// запись в WAV (чтобы прислать разработчику или проверить другим распознавателем)
+$("wav").onclick = () => {
+  if (!LAST) return;
+  const x = LAST.x, sr = LAST.sr, n = x.length, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+  const w = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, "data"); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, x[i])) * 32767, true);
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([b], {type: "audio/wav"}));
+  a.download = "запись_" + new Date().toTimeString().slice(0, 5).replace(":", "-") + ".wav"; a.click();
+};
+
 async function analyse(x, sr) {
   // 1) приводим к 16 кГц
   const len = Math.ceil(x.length * SR / sr);
