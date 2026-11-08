@@ -220,7 +220,8 @@ try:
     ok = [p for _, p in _on] == [52, 52, 50, 48, 45] and [b - a for (a, _), (b, _) in zip(_on, _on[1:])] == [1.0, 0.5, 0.5, 1.0]
     ok = ok and melody_midi.auto_octave([45, 47, 48, 52]) == 1 and _i["notes"] == 5
     _mh = open(os.path.join(ROOT, "web", "mic_recorder", "index.html"), encoding="utf-8").read()
-    ok = ok and all(k in _mh for k in ("getUserMedia", "yinFrames", "streamlit:setComponentValue", "OfflineAudioContext"))
+    ok = ok and all(k in _mh for k in ("getUserMedia", "yinFrames", "streamlit:setComponentValue", "OfflineAudioContext",
+                                       "ResizeObserver"))   # высота окошка внутри свёрнутого раздела
     print("%-30s %s" % ("напетая мелодия → MIDI", "OK " if ok else "FAIL"))
     failed += 0 if ok else 1
 except Exception:

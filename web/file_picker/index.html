@@ -97,4 +97,12 @@ $("inp").onchange = async () => {
 };
 send("streamlit:componentReady", {apiVersion: 1});
 window.addEventListener("load", height);
+// Высота окошка: внутри свёрнутого раздела оно сначала невидимо и меряется как пустое. Пересчитываем при любом
+// изменении размеров (раскрыли раздел, повернули телефон) и первые 10 секунд на всякий случай.
+let _lastH = 0;
+function height2() { const h = document.body.scrollHeight + 4; if (h > 20 && h !== _lastH) { _lastH = h; send("streamlit:setFrameHeight", {height: h}); } }
+try { new ResizeObserver(height2).observe(document.body); } catch (e) {}
+window.addEventListener("resize", height2);
+let _n = 0; const _iv = setInterval(() => { height2(); if (++_n > 20) clearInterval(_iv); }, 500);
+document.addEventListener("visibilitychange", height2);
 </script></body></html>
