@@ -19,7 +19,7 @@ def _b64(name):
 def build(prep, bank_url=DEFAULT_BANK_URL, bank_name=DEFAULT_BANK_NAME):
     data = {"parts": prep["parts"], "timemap": prep["timemap"], "tempo": prep["tempo"], "length": prep["length"],
             "meter": prep.get("meter") or [[0.0, 4, 4]],
-            "notes": prep["notes"], "name": prep["name"], "bankUrl": bank_url, "bankName": bank_name,
+            "notes": prep["notes"], "name": prep["name"], "notationError": prep.get("notation_error"), "bankUrl": bank_url, "bankName": bank_name,
             "midi": base64.b64encode(prep["sound"]).decode("ascii")}
     svg = "".join('<div class="page">%s</div>' % s for s in prep["pages"])
     return (TEMPLATE.replace("/*DATA*/null", json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))
@@ -72,6 +72,7 @@ button.on{background:#1f5fbf;color:#fff;border-color:#1f5fbf}
   </div>
   <div id="presets" style="font-size:.85rem;color:#6b5a3e;margin:.3rem 0"></div>
   <div id="status">Нажмите «Играть»: загрузится банк звуков.</div>
+  <div id="notes" style="font-size:.85rem;color:#6b5a3e;margin:.2rem 0"></div>
   <div id="prog"><div></div></div>
   <div id="parts"></div>
 </div>
@@ -311,7 +312,15 @@ renderParts();
 layout(); drawLine(0);
 $("time").textContent = "0:00 / " + fmt(D.length);
 $("play").disabled = false;
-if (D.notes && D.notes.length) $("status").textContent += " " + D.notes.join(" ");
+// пояснения к нотам — отдельной строкой, чтобы надпись о банке их не затирала
+if (D.notes && D.notes.length) $("notes").textContent = D.notes.join(" ");
+if (D.notationError) {
+  $("notes").style.color = "#9b1c1c";
+  const m = document.createElement("div");
+  m.style.cssText = "margin:12px;padding:12px;border:1px solid #d9a3a3;background:#fff4f4;color:#7a1414;border-radius:8px";
+  m.textContent = "Ноты на экране показать не удалось (звук играет). Пришлите снимок этого текста: " + D.notationError;
+  $("score").appendChild(m);
+}
 </script></body></html>"""
 
 

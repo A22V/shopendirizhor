@@ -193,6 +193,8 @@ def decode_xml(data):
         except UnicodeDecodeError:
             text = data.decode("cp1251", errors="replace") if b"1251" in data[:200] else data.decode("latin-1")
     text = text.lstrip("﻿ \t\r\n")
+    # строка <!DOCTYPE …> со ссылкой на внешнюю схему: в облаке verovio на ней молча отказывал (2026-11-08)
+    text = re.sub(r"<!DOCTYPE[^>\[]*(\[.*?\])?\s*>", "", text, count=1, flags=re.S)
     return re.sub(r'(<\?xml[^>]*encoding=["\'])[^"\']*(["\'])', r"\1UTF-8\2", text, count=1)
 
 
@@ -320,20 +322,32 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
                    "header": "none", "footer": "none", "pageMarginLeft": 30, "pageMarginRight": 30,
                    "pageMarginTop": 20, "pageMarginBottom": 20, "svgViewBox": True, "breaks": "auto",
                    "svgRemoveXlink": True})
-    if not tk.loadData(notation_xml):
-        # запасной путь: music21 перезаписывает ноты своим MusicXML, который verovio читает
-        ok = False
+    # Несколько попыток (в облаке verovio молча отказывал на MusicXML от music21): без BOM и DOCTYPE;
+    # как есть; без комментариев; в конце music21 перезаписывает ноты заново.
+    clean = decode_xml(notation_xml.encode("utf-8"))
+    tried, ok = [], False
+    for label, variant in (("без DOCTYPE", clean), ("как есть", notation_xml),
+                           ("без комментариев", re.sub(r"<!--.*?-->", "", clean, flags=re.S))):
+        if any(variant == v for _, v in tried):
+            continue
+        tried.append((label, variant))
+        if tk.loadData(variant):
+            ok = True
+            break
+    if not ok:
         try:
             alt = os.path.join(work, "again.musicxml")
-            music21.converter.parseData(notation_xml, format="musicxml").write("musicxml", fp=alt)
-            ok = tk.loadData(open(alt, encoding="utf-8").read())
+            music21.converter.parseData(clean, format="musicxml").write("musicxml", fp=alt)
+            tried.append(("перезапись music21", None))
+            ok = tk.loadData(decode_xml(open(alt, "rb").read()))
             if ok:
                 notes.append("Ноты пришлось перезаписать (исходный MusicXML распознаватель не принял).")
-        except Exception:
-            ok = False
+        except Exception as e:
+            tried.append(("перезапись music21: %s" % e, None))
         if not ok:
-            why = ("verovio не принял ноты (начало файла: %r, размер %d байт): %s"
-                   % (notation_xml[:80], len(notation_xml), (tk.getLog() or "")[-300:]))
+            why = ("verovio %s не принял ноты (размер %d байт; пробовал: %s): %s"
+                   % (tk.getVersion(), len(notation_xml), ", ".join(l for l, _ in tried),
+                      (tk.getLog() or "причина не указана").strip()[-300:]))
             return {"parts": [{k: p.get(k) for k in ("key", "label", "source", "channels", "program")} for p in parts],
                     "pages": [], "timemap": [], "tempo": tempo_map(mido.MidiFile(file=io.BytesIO(sound))),
                     "meter": meter_map(mido.MidiFile(file=io.BytesIO(sound))),
