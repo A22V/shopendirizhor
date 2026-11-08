@@ -40,7 +40,6 @@ import theme                 # noqa: E402
 import progress
 import jobs              # noqa: E402
 import picker            # noqa: E402  своя кнопка выбора файла (веб-сокет вместо канала загрузки)
-import mic               # noqa: E402  запись мелодии с микрофона
 st.markdown(theme.CSS(), unsafe_allow_html=True)
 _first_visit = not st.session_state.get("bq_opened")     # занавес раздвигается только при первом входе
 st.session_state["bq_opened"] = True
@@ -135,14 +134,8 @@ def any_file(label, key):
     return f or g
 
 
-_file = any_file("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ", "piece")
+up = checked_midi(any_file("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ", "piece"))
 picker.diagnostics()
-with st.expander("🎤 Или напеть мелодию (запись с микрофона)", expanded=st.session_state.get("_sung_mic") is not None):
-    _sung = mic.record("mic")
-# берётся то, что пришло последним: файл или напетая мелодия
-if _sung is not None and (_file is None or getattr(_sung, "ts", 0) > getattr(_file, "ts", 0)):
-    _file = _sung
-up = checked_midi(_file)
 
 
 def source_mp3(data: bytes):

@@ -78,10 +78,6 @@ if up is not None:
         src = (clean, base + ".mid")
 elif src:
     st.info("Открыта оркестровка «%s». Можно открыть и другой файл кнопкой выше." % src[1])
-elif st.session_state.get("sung_midi") is not None:
-    _s = st.session_state["sung_midi"]
-    src = (_s.getvalue(), _s.name)
-    st.info("Открыта напетая мелодия «%s». Можно открыть и другой файл кнопкой выше." % _s.name)
 
 if not src:
     st.write("Загрузите файл, чтобы увидеть ноты и послушать.")

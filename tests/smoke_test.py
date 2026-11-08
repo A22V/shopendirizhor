@@ -207,39 +207,6 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("своя кнопка выбора файла FAIL (исключение)"); traceback.print_exc(); failed += 1
-# напетая мелодия → MIDI (src/melody_midi.py, web/mic.py, web/mic_recorder/index.html)
-try:
-    import melody_midi, mido as _mido, io as _io
-    _N = [[0.12, 0.76, 52, 100], [0.88, 0.37, 52, 100], [1.25, 0.37, 50, 100], [1.62, 0.76, 48, 100], [2.38, 1.5, 45, 100]]
-    _d, _i = melody_midi.notes_to_midi(_N, 80, "восьмые", "0")
-    _m = _mido.MidiFile(file=_io.BytesIO(_d)); _t = 0; _on = []
-    for _x in _m.tracks[1]:
-        _t += _x.time
-        if _x.type == "note_on" and _x.velocity > 0:
-            _on.append((_t / 480, _x.note))
-    ok = [p for _, p in _on] == [52, 52, 50, 48, 45] and [b - a for (a, _), (b, _) in zip(_on, _on[1:])] == [1.0, 0.5, 0.5, 1.0]
-    ok = ok and melody_midi.auto_octave([45, 47, 48, 52]) == 1 and _i["notes"] == 5
-    _mh = open(os.path.join(ROOT, "web", "mic_recorder", "index.html"), encoding="utf-8").read()
-    ok = ok and all(k in _mh for k in ("getUserMedia", "yinFrames", "streamlit:setComponentValue", "OfflineAudioContext",
-                                       "ResizeObserver", "analyseBP", "basic_pitch_model/model.json"))
-    _md = os.path.join(ROOT, "web", "mic_recorder")
-    ok = ok and all(os.path.getsize(os.path.join(_md, f)) > 100000 for f in
-                    ("basic_pitch.min.js", "basic_pitch_model/model.json", "basic_pitch_model/group1-shard1of1.bin"))
-    # режим «несколько нот сразу»: аккорд сохраняется, октава не сдвигается
-    _P = [[0.0, 1.0, 48, 90], [0.0, 1.0, 52, 90], [0.0, 1.0, 55, 90], [1.0, 0.5, 60, 90]]
-    _dp, _ip = melody_midi.notes_to_midi(_P, 80, "нет", "авто", poly=True)
-    _mp = _mido.MidiFile(file=_io.BytesIO(_dp)); _tp = 0; _at0 = []
-    for _x in _mp.tracks[1]:
-        _tp += _x.time
-        if _x.type == "note_on" and _x.velocity > 0 and _tp == 0:
-            _at0.append(_x.note)
-    ok = ok and sorted(_at0) == [48, 52, 55] and _ip["octave_shift"] == 0 and _ip["poly"] and _ip["notes"] == 4
-    ok = ok and "bpp" in _mh and "poly:" in _mh
-    ok = ok and "decodeAudioData" in _mh and 'id="afile"' in _mh and "MAX_FILE_SEC" in _mh
-    print("%-30s %s" % ("напетая мелодия → MIDI", "OK " if ok else "FAIL"))
-    failed += 0 if ok else 1
-except Exception:
-    print("напетая мелодия → MIDI FAIL (исключение)"); traceback.print_exc(); failed += 1
 # фоновые задания (web/jobs.py): работа идёт без страницы, повторный запуск того же задания не считается заново
 try:
     sys.path.insert(0, os.path.join(ROOT, "web"))
