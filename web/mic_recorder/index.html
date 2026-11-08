@@ -35,6 +35,8 @@ canvas{width:100%;height:150px;background:#fff;border:1px solid #e3d5b5;border-r
   <div class="row">
     <button id="rec" type="button">🎤 Запись</button>
     <button id="stop" type="button" class="sec" disabled>■ Стоп</button>
+    <button id="open" type="button" class="sec">📂 Звуковой файл</button>
+    <input id="afile" type="file" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.aac" style="display:none">
     <span id="beat"></span>
     <div id="lvl"><div></div></div>
   </div>
@@ -46,7 +48,8 @@ canvas{width:100%;height:150px;background:#fff;border:1px solid #e3d5b5;border-r
     <button id="wav" type="button" class="sec" disabled>⬇ Скачать запись (WAV)</button>
   </div>
   <div class="hint">Лучше всего распознаётся пение на один слог («ля-ля», «на-на») или свист в тихой комнате.
-    Один голос: аккорды не распознаются. До 90 секунд.</div>
+    Запись до 90 секунд. Готовый звуковой файл (WAV, MP3, M4A…) лучше записи с динамика: до 2 минут, остаётся в телефоне.
+    Для музыки с аккордами выберите «несколько нот сразу» (при загрузке файла оно ставится само).</div>
 </div>
 <script>
 const $ = id => document.getElementById(id);
@@ -138,6 +141,33 @@ function stopRec() {
   LAST = {x: all, sr: recSR}; $("wav").disabled = false;
   runAnalysis();
 }
+
+// ---------- готовый звуковой файл (без микрофона) ----------
+const MAX_FILE_SEC = 120;       // эвристика: на тестовом компьютере без видеокарты 77 с звука считались 160 с
+$("open").onclick = () => $("afile").click();
+$("afile").onchange = async () => {
+  const f = $("afile").files[0]; if (!f) return;
+  $("afile").value = "";
+  if (f.size > 30 * 1024 * 1024) { status("Файл больше 30 МБ. Возьмите короткий отрывок (до 2 минут).", "bad"); return; }
+  status("Читаю звуковой файл «" + f.name + "»…");
+  try {
+    const ab = await f.arrayBuffer();
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await ac.decodeAudioData(ab); ac.close();
+    const n = Math.min(buf.length, Math.floor(buf.sampleRate * MAX_FILE_SEC));
+    const mono = new Float32Array(n);
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const d = buf.getChannelData(c);
+      for (let i = 0; i < n; i++) mono[i] += d[i] / buf.numberOfChannels;
+    }
+    LAST = {x: mono, sr: buf.sampleRate}; $("wav").disabled = false;
+    $("eng").value = "bpp"; $("grid").value = "нет"; $("oct").value = "0";
+    if (buf.length > n) status("Файл длиннее 2 минут: берём первые 2 минуты. Распознаю…");
+    runAnalysis();
+  } catch (e) {
+    status("Не удалось прочитать звук (" + (e && e.message ? e.message : e) + "). Подойдут WAV, MP3, M4A, OGG.", "bad");
+  }
+};
 
 // ---------- распознавание ----------
 let LAST = null;

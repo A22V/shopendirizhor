@@ -235,6 +235,7 @@ try:
             _at0.append(_x.note)
     ok = ok and sorted(_at0) == [48, 52, 55] and _ip["octave_shift"] == 0 and _ip["poly"] and _ip["notes"] == 4
     ok = ok and "bpp" in _mh and "poly:" in _mh
+    ok = ok and "decodeAudioData" in _mh and 'id="afile"' in _mh and "MAX_FILE_SEC" in _mh
     print("%-30s %s" % ("напетая мелодия → MIDI", "OK " if ok else "FAIL"))
     failed += 0 if ok else 1
 except Exception:
