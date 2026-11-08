@@ -132,11 +132,27 @@ def prepare(musicxml_path=None, midi_path=None, staff_names=None):
     # открывает путь на сервере. Если и так не вышло, в ошибке будет причина из самой библиотеки.
     with open(musicxml_path, "rb") as fh:
         raw = fh.read()
+    # Несколько попыток: как есть; без метки BOM и строки DOCTYPE (в облаке verovio молча отказывал на файлах
+    # music21, где DOCTYPE ссылается на внешнюю схему); потом без комментариев и лишних пробелов.
+    import re
+    import score_player
     text = raw.decode("utf-8", errors="replace")
-    if not tk.loadData(text):
+    clean = score_player.decode_xml(raw)
+    slim = re.sub(r"<!--.*?-->", "", clean, flags=re.S)
+    tried, loaded = [], False
+    for label, variant in (("как есть", text), ("без DOCTYPE и BOM", clean), ("без комментариев", slim)):
+        if variant in [v for _, v in tried]:
+            continue
+        tried.append((label, variant))
+        tk = verovio.toolkit()
+        tk.setOptions(OPTIONS)
+        if tk.loadData(variant):
+            loaded = True
+            break
+    if not loaded:
         log = (tk.getLog() or "").strip()[-600:]
-        raise ValueError("verovio не смог прочитать MusicXML (размер %d байт; причина из verovio: %s)"
-                         % (len(raw), log or "не указана"))
+        raise ValueError("verovio не смог прочитать MusicXML (размер %d байт; версия verovio %s; пробовал: %s; причина из verovio: %s)"
+                         % (len(raw), tk.getVersion(), ", ".join(l for l, _ in tried), log or "не указана"))
     root = ET.fromstring(tk.getMEI())
     # номер нотного стана -> название инструмента, как в рецензии ("Скрипка I" и т. д.)
     staff_name, violins = {}, 0
