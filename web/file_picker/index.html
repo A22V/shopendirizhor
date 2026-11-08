@@ -1,8 +1,10 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-/* Своя кнопка выбора файла (2026-11-08). Файл читается в браузере и уходит в программу по тому же каналу,
-   что и все нажатия (веб-сокет), а не по отдельному каналу загрузки Streamlit, который на телефоне молча отказывал. */
+/* Своя кнопка выбора файла (2026-11-08, версия 2).
+   Файл читается в браузере и передаётся программе частями по веб-сокету (канал всех нажатий).
+   «Принят» пишется только после подтверждения сервера. Пока сервер не подтвердил, браузер сам повторяет
+   отправку (в том числе после перезапуска сервера): файл хранится в браузере до подтверждения. */
 html,body{margin:0;padding:0;background:transparent;font-family:Georgia,"Times New Roman",serif;color:#2b1d0e}
 .lbl{font-size:15px;margin:0 0 6px}
 .box{border:1.5px dashed #b08a3e;border-radius:10px;background:#f6ecd6;padding:10px 12px;display:flex;flex-wrap:wrap;align-items:center;gap:10px}
@@ -21,13 +23,29 @@ input{display:none}
 </div>
 <input id="inp" type="file">
 <script>
+const CHUNK = 192 * 1024;             // символов base64 в одной части (≈144 КБ файла)
+const WAIT_MS = 6000;                 // столько ждём подтверждения части, потом повторяем
 const $ = id => document.getElementById(id);
-let ARGS = {}, sent = null, cleared = false;
+let ARGS = {}, P = null, timer = null, cleared = false;
 function send(type, extra) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, extra || {}), "*"); }
 function height() { send("streamlit:setFrameHeight", {height: document.body.scrollHeight + 4}); }
 function setValue(v) { send("streamlit:setComponentValue", {value: v, dataType: "json"}); }
 function status(t, cls) { const s = $("st"); s.textContent = t; s.className = "st " + (cls || ""); height(); }
 const kb = n => n < 1024 * 1024 ? (n / 1024).toFixed(1) + " КБ" : (n / 1048576).toFixed(2) + " МБ";
+
+function sendPart(i) {
+  if (!P) return;
+  P.idx = i; P.tries += 1;
+  setValue({nonce: P.nonce, name: P.name, size: P.size, idx: i, total: P.total, part: P.b64.slice(i * CHUNK, (i + 1) * CHUNK)});
+  const msg = P.total > 1 ? "Передаю «" + P.name + "»: часть " + (i + 1) + " из " + P.total : "Передаю «" + P.name + "» программе…";
+  status(msg + (P.tries > 1 ? " (попытка " + P.tries + ")" : ""));
+  clearTimeout(timer);
+  timer = setTimeout(() => {                         // сервер не ответил: повторяем ту же часть
+    if (!P) return;
+    if (P.tries >= 8) { status("Сервер не отвечает (" + P.tries + " попыток). Обновите страницу и выберите файл ещё раз.", "bad"); return; }
+    sendPart(P.idx);
+  }, WAIT_MS);
+}
 
 window.addEventListener("message", e => {
   const d = e.data || {};
@@ -35,13 +53,27 @@ window.addEventListener("message", e => {
   ARGS = d.args || {};
   $("lbl").textContent = ARGS.label || "";
   $("lbl").style.display = ARGS.label ? "" : "none";
-  const cur = ARGS.current;           // имя уже принятого файла (после перезапуска страницы)
-  if (cur && !sent && !cleared) { status("✔ Принят: " + cur, "ok"); $("clr").style.display = ""; }
+  const ack = ARGS.ack || {};
+  if (P) {
+    if (ack.done === P.nonce) {                      // сервер собрал файл целиком
+      clearTimeout(timer);
+      status("✔ Программа получила: " + P.name + " (" + kb(P.size) + ")", "ok");
+      P.confirmed = true;
+    } else if (!P.confirmed && ack.nonce === P.nonce && ack.next != null && ack.next !== P.idx) {
+      P.tries = 0; sendPart(ack.next);               // часть дошла: следующая недостающая
+    } else if (!P.confirmed && ack.nonce !== P.nonce && P.idx > 0) {
+      P.tries = 0; sendPart(0);                      // сервер ничего не знает о файле (перезапуск?): сначала
+    } else if (P.confirmed && ack.done !== P.nonce) {
+      P.confirmed = false; P.tries = 0; sendPart(0);  // сервер перезапустился и забыл файл: отправляем снова
+    }
+  } else if (ack.done && ARGS.current && !cleared) {
+    status("✔ Программа получила: " + ARGS.current, "ok"); $("clr").style.display = "";
+  }
   height();
 });
 
 $("btn").onclick = () => { $("inp").value = ""; $("inp").click(); };
-$("clr").onclick = () => { sent = null; cleared = true; setValue(null); $("clr").style.display = "none"; status("Файл не выбран."); };
+$("clr").onclick = () => { clearTimeout(timer); P = null; cleared = true; setValue(null); $("clr").style.display = "none"; status("Файл не выбран."); };
 $("inp").onchange = async () => {
   const f = $("inp").files && $("inp").files[0];
   if (!f) return;
@@ -55,10 +87,10 @@ $("inp").onchange = async () => {
     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
     const b64 = btoa(bin);
     cleared = false;
-    sent = {name: f.name, size: f.size, b64: b64, nonce: Date.now() + "-" + Math.random().toString(36).slice(2)};
-    setValue(sent);
+    P = {name: f.name, size: f.size, b64: b64, total: Math.max(1, Math.ceil(b64.length / CHUNK)),
+         nonce: Date.now() + "-" + Math.random().toString(36).slice(2), idx: 0, tries: 0, confirmed: false};
     $("clr").style.display = "";
-    status("✔ Принят: " + f.name + " (" + kb(f.size) + ")", "ok");
+    sendPart(0);
   } catch (err) {
     status("Не удалось прочитать файл: " + (err && err.message ? err.message : err), "bad");
   }

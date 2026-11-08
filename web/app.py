@@ -135,6 +135,7 @@ def any_file(label, key):
 
 
 up = checked_midi(any_file("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ", "piece"))
+picker.diagnostics()
 
 
 def source_mp3(data: bytes):

@@ -58,6 +58,7 @@ up = picker.pick("Открыть файл: MIDI (.mid) или MusicXML (.musicxm
 with st.expander("Запасная кнопка загрузки (если основная не сработала)"):
     _native = st.file_uploader("Обычная загрузка Streamlit", key="player_file")
 up = up or _native
+picker.diagnostics()
 if up is not None:
     data = up.getvalue()
     if len(data) > MAX_MB * 1024 * 1024:
