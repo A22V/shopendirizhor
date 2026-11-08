@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+/* Запись мелодии с микрофона (2026-11-08, этап 1).
+   Звук записывается и разбирается прямо в браузере: высота по алгоритму YIN (de Cheveigné & Kawahara, 2002),
+   границы нот по смене высоты и по провалам громкости (эвристика). В программу уходят только ноты. */
+html,body{margin:0;padding:0;background:transparent;font-family:Georgia,"Times New Roman",serif;color:#2b1d0e}
+.box{border:1.5px solid #b08a3e;border-radius:10px;background:#fbf4e4;padding:10px 12px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:6px 0}
+button{font:inherit;font-size:16px;padding:9px 14px;border-radius:9px;border:1.5px solid #8e1426;background:#8e1426;color:#fff;cursor:pointer}
+button.sec{background:#fff;color:#8e1426}
+button:disabled{opacity:.45;cursor:default}
+label{font-size:14px}
+select,input[type=number]{font:inherit;font-size:15px;padding:3px 4px;border:1px solid #b08a3e;border-radius:6px;background:#fff}
+input[type=number]{width:64px}
+.st{font-size:14px;color:#5a4528;word-break:break-word}
+.ok{color:#1d6b2f}.bad{color:#a01818}
+#beat{display:inline-block;width:16px;height:16px;border-radius:50%;background:#ddd;vertical-align:middle}
+#beat.on{background:#8e1426}
+#lvl{height:8px;background:#eee;border-radius:4px;overflow:hidden;flex:1 1 120px}
+#lvl > div{height:100%;width:0;background:#1f5fbf}
+canvas{width:100%;height:150px;background:#fff;border:1px solid #e3d5b5;border-radius:6px;display:block}
+.hint{font-size:13px;color:#6b5a3e}
+</style></head><body>
+<div class="box">
+  <div class="row">
+    <label>Темп <input id="tempo" type="number" min="40" max="200" value="80"> уд/мин</label>
+    <label>Ритм <select id="grid"><option>восьмые</option><option>шестнадцатые</option><option>нет</option></select></label>
+    <label>Октава <select id="oct"><option value="авто">авто</option><option value="-2">−2</option><option value="-1">−1</option><option value="0">как спето</option><option value="1">+1</option><option value="2">+2</option></select></label>
+  </div>
+  <div class="row">
+    <label><input id="click" type="checkbox"> щелчки во время записи (лучше в наушниках)</label>
+  </div>
+  <div class="row">
+    <button id="rec" type="button">🎤 Запись</button>
+    <button id="stop" type="button" class="sec" disabled>■ Стоп</button>
+    <span id="beat"></span>
+    <div id="lvl"><div></div></div>
+  </div>
+  <div class="st" id="st">Нажмите «Запись»: сначала прозвучат 4 щелчка (отсчёт), потом пойте.</div>
+  <canvas id="roll" width="900" height="150" style="display:none"></canvas>
+  <div class="row">
+    <button id="play" type="button" class="sec" disabled>▶ Прослушать распознанное</button>
+    <button id="send" type="button" disabled>➜ Отправить в программу</button>
+  </div>
+  <div class="hint">Лучше всего распознаётся пение на один слог («ля-ля», «на-на») или свист в тихой комнате.
+    Один голос: аккорды не распознаются. До 90 секунд.</div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const MAX_SEC = 90, SR = 16000;          // разбираем на 16 кГц: этого хватает для голоса и свиста
+let ARGS = {}, stream = null, ctx = null, node = null, src = null, chunks = [], recSR = 48000;
+let recStart = 0, beatTimer = null, NOTES = null, SENT = null, sendTimer = null, sendTries = 0;
+function send(type, extra) { window.parent.postMessage(Object.assign({isStreamlitMessage: true, type: type}, extra || {}), "*"); }
+function height() { send("streamlit:setFrameHeight", {height: document.body.scrollHeight + 4}); }
+function status(t, cls) { const s = $("st"); s.textContent = t; s.className = "st " + (cls || ""); height(); }
+const NAMES = ["до", "до♯", "ре", "ре♯", "ми", "фа", "фа♯", "соль", "соль♯", "ля", "ля♯", "си"];
+
+window.addEventListener("message", e => {
+  const d = e.data || {};
+  if (d.type !== "streamlit:render") return;
+  ARGS = d.args || {};
+  if (SENT && ARGS.done === SENT.nonce) {
+    clearTimeout(sendTimer);
+    status("✔ Программа получила мелодию: " + NOTES.length + " нот. Ниже появится «Исходный файл».", "ok");
+  }
+  height();
+});
+
+// ---------- щелчки ----------
+function click(t, hi) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = hi ? 1760 : 1175;
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.002);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.06);
+}
+
+// ---------- запись ----------
+const WORKLET = `class Cap extends AudioWorkletProcessor{process(i){const c=i[0];if(c&&c[0])this.port.postMessage(c[0].slice(0));return true}}registerProcessor('cap',Cap);`;
+$("rec").onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false}});
+  } catch (err) {
+    status("Нет доступа к микрофону: " + (err && err.message ? err.message : err) + ". Разрешите микрофон для этого сайта в настройках браузера.", "bad");
+    return;
+  }
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  await ctx.resume();
+  recSR = ctx.sampleRate;
+  const url = URL.createObjectURL(new Blob([WORKLET], {type: "application/javascript"}));
+  await ctx.audioWorklet.addModule(url);
+  src = ctx.createMediaStreamSource(stream);
+  node = new AudioWorkletNode(ctx, "cap");
+  chunks = []; NOTES = null; SENT = null;
+  $("play").disabled = true; $("send").disabled = true; $("roll").style.display = "none";
+  const tempo = Math.max(40, Math.min(200, +$("tempo").value || 80)), spb = 60 / tempo;
+  const t0 = ctx.currentTime + 0.15;
+  for (let i = 0; i < 4; i++) click(t0 + i * spb, i === 0);           // отсчёт: 4 щелчка
+  recStart = t0 + 4 * spb;                                              // первая доля записи
+  status("Отсчёт…");
+  let capturing = false, n = 0;
+  node.port.onmessage = ev => {
+    if (!capturing) { if (ctx.currentTime >= recStart - 0.01) capturing = true; else return; }
+    chunks.push(ev.data); n += ev.data.length;
+    let s = 0; for (const x of ev.data) s += x * x;
+    $("lvl").firstElementChild.style.width = Math.min(100, Math.sqrt(s / ev.data.length) * 400) + "%";
+    if (n / recSR > MAX_SEC) stopRec();
+  };
+  src.connect(node);
+  // световой метроном (и звуковой — по желанию)
+  let k = 0;
+  const tick = () => {
+    const now = ctx.currentTime;
+    const next = recStart + k * spb;
+    if (now >= recStart - 0.05 && k === 0) status("● Идёт запись. Пойте. Нажмите «Стоп», когда закончите.");
+    if ($("click").checked && next > now && next < now + 0.3 && now >= recStart - spb) click(next, k % 4 === 0);
+    if (now >= next) { $("beat").className = "on"; setTimeout(() => $("beat").className = "", 90); k++; }
+  };
+  beatTimer = setInterval(tick, 25);
+  $("rec").disabled = true; $("stop").disabled = false;
+};
+$("stop").onclick = () => stopRec();
+
+function stopRec() {
+  if (!node) return;
+  clearInterval(beatTimer);
+  try { src.disconnect(); node.disconnect(); } catch (e) {}
+  stream.getTracks().forEach(t => t.stop());
+  node = null;
+  $("rec").disabled = false; $("stop").disabled = true; $("lvl").firstElementChild.style.width = "0";
+  const n = chunks.reduce((a, c) => a + c.length, 0);
+  if (n < recSR * 0.5) { status("Запись слишком короткая.", "bad"); return; }
+  const all = new Float32Array(n); let o = 0;
+  for (const c of chunks) { all.set(c, o); o += c.length; }
+  status("Распознаю ноты…");
+  setTimeout(() => analyse(all, recSR).then(show).catch(err => status("Ошибка распознавания: " + err, "bad")), 30);
+}
+
+// ---------- распознавание ----------
+async function analyse(x, sr) {
+  // 1) приводим к 16 кГц
+  const len = Math.ceil(x.length * SR / sr);
+  const off = new OfflineAudioContext(1, len, SR);
+  const buf = off.createBuffer(1, x.length, sr); buf.copyToChannel(x, 0);
+  const s = off.createBufferSource(); s.buffer = buf; s.connect(off.destination); s.start();
+  const y = (await off.startRendering()).getChannelData(0);
+  return detect(y, SR);
+}
+
+// YIN по кадрам; возвращает массив кадров {t, midi|null, rms}
+function yinFrames(y, sr) {
+  const W = 512, HOP = 160, tauMin = Math.floor(sr / 1500), tauMax = Math.ceil(sr / 65);
+  const frames = [], d = new Float32Array(tauMax + 1);
+  for (let p = 0; p + W + tauMax < y.length; p += HOP) {
+    let e = 0; for (let i = 0; i < W; i++) e += y[p + i] * y[p + i];
+    const rms = Math.sqrt(e / W);
+    d[0] = 0;
+    for (let tau = 1; tau <= tauMax; tau++) {
+      let s = 0; for (let i = 0; i < W; i++) { const q = y[p + i] - y[p + i + tau]; s += q * q; } d[tau] = s;
+    }
+    let run = 0, best = -1;
+    for (let tau = 1; tau <= tauMax; tau++) { run += d[tau]; d[tau] = run ? d[tau] * tau / run : 1; }
+    for (let tau = tauMin; tau <= tauMax; tau++) {
+      if (d[tau] < 0.15) { while (tau + 1 <= tauMax && d[tau + 1] < d[tau]) tau++; best = tau; break; }
+    }
+    if (best < 0) {                       // шаг YIN «лучший минимум»: порога нет, но явный минимум есть
+      let mi = tauMin; for (let tau = tauMin; tau <= tauMax; tau++) if (d[tau] < d[mi]) mi = tau;
+      if (d[mi] < 0.35) best = mi;        // 0,35 — эвристика (шум, вибрато)
+    }
+    let midi = null;
+    if (best > 0) {
+      const a = d[best - 1], b = d[best], c = best + 1 <= tauMax ? d[best + 1] : b;
+      const den = a - 2 * b + c, sh = den ? 0.5 * (a - c) / den : 0;
+      const f = sr / (best + sh);
+      midi = 69 + 12 * Math.log2(f / 440);
+    }
+    frames.push({t: (p + W / 2) / sr, midi: midi, rms: rms});
+  }
+  return frames;
+}
+
+function median(a) { const s = a.slice().sort((p, q) => p - q); return s.length ? s[s.length >> 1] : 0; }
+
+function detect(y, sr) {
+  const F = yinFrames(y, sr), HOP_S = 160 / sr;
+  const rmsAll = F.map(f => f.rms).sort((a, b) => a - b);
+  const loud = rmsAll[Math.floor(rmsAll.length * 0.95)] || 0;
+  const gate = Math.max(0.004, loud * 0.12);                         // эвристика: тише 12% от громких мест = тишина
+  // сглаживание высоты медианой по 5 кадрам
+  const raw = F.map(f => (f.rms >= gate ? f.midi : null));
+  const sm = raw.map((m, i) => {
+    if (m == null) return null;
+    const w = []; for (let k = i - 2; k <= i + 2; k++) if (raw[k] != null) w.push(raw[k]);
+    return median(w);
+  });
+  // общая «настройка» певца: сдвиг относительно равномерной темперации
+  const fr = sm.filter(m => m != null).map(m => m - Math.round(m));
+  const tune = fr.length ? Math.atan2(fr.reduce((a, v) => a + Math.sin(2 * Math.PI * v), 0),
+                                      fr.reduce((a, v) => a + Math.cos(2 * Math.PI * v), 0)) / (2 * Math.PI) : 0;
+  const notes = []; let cur = null;
+  const close = (endT) => {
+    if (cur && endT - cur.t0 >= 0.1) {                                 // короче 100 мс — не нота (эвристика)
+      const p = Math.round(median(cur.ps) - tune);
+      const v = Math.max(40, Math.min(110, Math.round(40 + 70 * Math.min(1, Math.max(...cur.rs) / (loud || 1)))));
+      notes.push([+cur.t0.toFixed(3), +(endT - cur.t0).toFixed(3), p, v]);
+    }
+    cur = null;
+  };
+  let pend = 0;
+  const fresh = (t, m, r, q) => ({t0: t, ps: [m], rs: [r], last: t, q: q, peak: r, valley: r});
+  for (let i = 0; i < F.length; i++) {
+    const m = sm[i], t = F[i].t, r = F[i].rms;
+    if (m == null) {
+      // тишина (тихо) рвёт ноту через 40 мс; «неясный» громкий кадр (шум, вибрато) — только через 150 мс
+      const quiet = r < gate;
+      if (cur && t - cur.last > (quiet ? 0.04 : 0.15)) close(cur.last + HOP_S);
+      continue;
+    }
+    const q = Math.round(m - tune);
+    if (!cur) { cur = fresh(t, m, r, q); pend = 0; continue; }
+    // новый слог на той же высоте: громкость провалилась ниже ~половины пика и снова выросла (эвристика)
+    if (r > cur.peak) { cur.peak = r; cur.valley = r; } else cur.valley = Math.min(cur.valley, r);
+    if (t - cur.t0 > 0.1 && cur.valley < 0.55 * cur.peak && r > 1.6 * cur.valley) {
+      close(t); cur = fresh(t, m, r, q); pend = 0; continue;
+    }
+    // смена ноты только если высота ушла от середины текущей ноты больше чем на 0,7 полутона (гистерезис,
+    // эвристика): иначе вибрато и неточная интонация на границе двух нот дробят одну долгую ноту
+    if (q !== cur.q && Math.abs((m - tune) - (median(cur.ps.slice(-40)) - tune)) > 0.7) {
+      pend++;
+      if (pend >= 3) {                                                // 3 кадра (≈30 мс) на новой высоте — новая нота
+        const startT = F[i - 2].t;
+        close(startT);
+        cur = fresh(startT, m, r, q); pend = 0;
+      }
+      continue;
+    }
+    pend = 0;
+    cur.ps.push(m); cur.rs.push(r); cur.last = t;
+  }
+  if (cur) close(cur.last + HOP_S);
+  return {notes: notes, tune: tune, frames: F.length};
+}
+
+// ---------- показ и прослушивание ----------
+function show(res) {
+  NOTES = res.notes;
+  if (!NOTES.length) { status("Нот не найдено: запись слишком тихая или шумная. Попробуйте ближе к микрофону.", "bad"); return; }
+  const c = $("roll"), g = c.getContext("2d"); c.style.display = "block";
+  const W = c.width, H = c.height, end = Math.max(...NOTES.map(n => n[0] + n[1]));
+  const lo = Math.min(...NOTES.map(n => n[2])) - 2, hi = Math.max(...NOTES.map(n => n[2])) + 2;
+  g.clearRect(0, 0, W, H);
+  g.strokeStyle = "#efe6d2";
+  for (let p = lo; p <= hi; p++) { const yy = H - (p - lo + 0.5) / (hi - lo + 1) * H; g.beginPath(); g.moveTo(0, yy); g.lineTo(W, yy); g.stroke(); }
+  g.fillStyle = "#8e1426";
+  for (const [t, d, p] of NOTES) {
+    const x0 = t / end * W, x1 = (t + d) / end * W, yy = H - (p - lo + 1) / (hi - lo + 1) * H;
+    g.fillRect(x0, yy, Math.max(2, x1 - x0 - 1), Math.max(3, H / (hi - lo + 1) - 1));
+  }
+  const nm = NOTES.slice(0, 12).map(n => NAMES[((n[2] % 12) + 12) % 12]).join(" ");
+  status("Найдено нот: " + NOTES.length + " (начало: " + nm + (NOTES.length > 12 ? " …" : "") +
+         "). Послушайте и, если похоже, отправьте в программу.");
+  $("play").disabled = false; $("send").disabled = false;
+}
+
+$("play").onclick = async () => {
+  if (!NOTES) return;
+  ctx = ctx && ctx.state !== "closed" ? ctx : new AudioContext();
+  await ctx.resume();
+  const t0 = ctx.currentTime + 0.1;
+  for (const [t, d, p, v] of NOTES) {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "triangle"; o.frequency.value = 440 * Math.pow(2, (p - 69) / 12);
+    const a = t0 + t, b = a + Math.max(0.06, d), amp = 0.25 * v / 110;
+    g.gain.setValueAtTime(0.0001, a); g.gain.exponentialRampToValueAtTime(amp, a + 0.02);
+    g.gain.setValueAtTime(amp, b - 0.03); g.gain.exponentialRampToValueAtTime(0.0001, b);
+    o.connect(g).connect(ctx.destination); o.start(a); o.stop(b + 0.02);
+  }
+};
+
+function sendNow() {
+  sendTries++;
+  send("streamlit:setComponentValue", {value: SENT, dataType: "json"});
+  clearTimeout(sendTimer);
+  sendTimer = setTimeout(() => {
+    if (sendTries >= 6) { status("Программа не ответила. Обновите страницу и запишите ещё раз.", "bad"); return; }
+    sendNow();
+  }, 6000);
+}
+$("send").onclick = () => {
+  if (!NOTES) return;
+  SENT = {nonce: Date.now() + "-" + Math.random().toString(36).slice(2), notes: NOTES,
+          tempo: Math.max(40, Math.min(200, +$("tempo").value || 80)), grid: $("grid").value, octave: $("oct").value};
+  sendTries = 0;
+  status("Передаю мелодию программе…");
+  sendNow();
+};
+send("streamlit:componentReady", {apiVersion: 1});
+window.addEventListener("load", height);
+</script></body></html>

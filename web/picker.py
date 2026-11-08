@@ -20,7 +20,7 @@ SERVER_STARTED = time.time()          # когда запущен процесс
 
 class Picked:
     def __init__(self, name, data):
-        self.name, self._data, self.size = name, data, len(data)
+        self.name, self._data, self.size, self.ts = name, data, len(data), time.time()
 
     def getvalue(self):
         return self._data
