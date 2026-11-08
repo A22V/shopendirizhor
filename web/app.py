@@ -555,6 +555,32 @@ elif go and up is not None:
         except Exception:
             pass
 
+@st.fragment(run_every=3)
+def _show_progress(_job):
+    """Прогресс фонового задания. Обновляется только этот блок (а не вся страница): раньше страница
+    перезапускалась через st.rerun() каждые 3 с и оставляла бледную копию прежнего блока («двойник»).
+    Когда задание кончилось, перезапускаем всю страницу один раз, чтобы показать результат."""
+    _js = jobs.status(_job)
+    if _js is None or _js.get("state") in ("done", "error") or not jobs.alive(_job):
+        st.rerun()
+    _steps = [tuple(x) for x in _js.get("steps", [])]
+    _keys = [k for k, _ in _steps]
+    _i = _keys.index(_js.get("step")) if _js.get("step") in _keys else 0
+    _dur = float(_js.get("dur") or 60.0)
+    _est = [progress.estimate(k, _dur) for k in _keys]
+    _left = max(0.0, sum(_est[_i:]) - (time.time() - float(_js.get("step_started", time.time()))))
+    st.markdown(theme.SECTION("III", "Результат"), unsafe_allow_html=True)
+    st.progress(min(sum(_est[:_i]) / (sum(_est) or 1.0), 0.99),
+                text="Шаг %d из %d: %s" % (_i + 1, len(_steps), _steps[_i][1] if _steps else ""))
+    try:
+        import streamlit.components.v1 as _cmp
+        _cmp.html(progress._countdown_html(_left), height=52)
+    except Exception:
+        st.caption("Осталось примерно %s" % progress._clock(_left))
+    st.info("Оркестровка идёт на сервере. Можно погасить экран или переключиться в другое приложение: "
+            "когда вернётесь, страница сама покажет результат.")
+
+
 # Фоновое задание оркестровки: показать прогресс или забрать готовый результат (и после возвращения на страницу)
 try:
     _qp = st.query_params.get("job")
@@ -592,24 +618,7 @@ if _job and st.session_state.get("job_loaded") != _job:
         st.warning("Оркестровка прервалась: сервер перезапускался во время работы. Запустите её ещё раз.")
         _forget_job()
     else:
-        _steps = [tuple(x) for x in _js.get("steps", [])]
-        _keys = [k for k, _ in _steps]
-        _i = _keys.index(_js.get("step")) if _js.get("step") in _keys else 0
-        _dur = float(_js.get("dur") or 60.0)
-        _est = [progress.estimate(k, _dur) for k in _keys]
-        _left = max(0.0, sum(_est[_i:]) - (time.time() - float(_js.get("step_started", time.time()))))
-        st.markdown(theme.SECTION("III", "Результат"), unsafe_allow_html=True)
-        st.progress(min(sum(_est[:_i]) / (sum(_est) or 1.0), 0.99),
-                    text="Шаг %d из %d: %s" % (_i + 1, len(_steps), _steps[_i][1] if _steps else ""))
-        try:
-            import streamlit.components.v1 as _cmp
-            _cmp.html(progress._countdown_html(_left), height=52)
-        except Exception:
-            st.caption("Осталось примерно %s" % progress._clock(_left))
-        st.info("Оркестровка идёт на сервере. Можно погасить экран или переключиться в другое приложение: "
-                "когда вернётесь, страница сама покажет результат.")
-        time.sleep(3)
-        st.rerun()
+        _show_progress(_job)
 
 res = st.session_state.result
 if res and res.get("mode") == "review":
