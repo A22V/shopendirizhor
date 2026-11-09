@@ -26,6 +26,13 @@ KEY_VARS = {"deepseek": "DEEPSEEK_API_KEY", "gpt": "OPENAI_API_KEY",
             "claude": "ANTHROPIC_API_KEY", "gemini": "GEMINI_API_KEY"}
 
 
+# LLM_STRICT=1 (OFF by default): strict instruction with confirmed rules and a worked example, temperature 0,
+# the quality gate (src/quality_gate.py) joins the retry loop, and a plan that is still defective after all rounds
+# is replaced by the built-in plan if that one is better. Temperature 0 is a heuristic (the service may ignore it).
+STRICT = os.environ.get("LLM_STRICT") == "1"
+TEMPERATURE = 0.0 if STRICT else 0.3
+
+
 def build_request(provider, model, api_key, system, user):
     """Return (url, headers, body_bytes) for the provider. No network call here."""
     if provider in ("deepseek", "gpt"):
@@ -33,7 +40,7 @@ def build_request(provider, model, api_key, system, user):
         headers = {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}
         body = {"model": model, "messages": [{"role": "system", "content": system},
                                              {"role": "user", "content": user}],
-                "temperature": 0.3}
+                "temperature": TEMPERATURE}
     elif provider == "claude":
         url = ENDPOINTS[provider]
         headers = {"Content-Type": "application/json", "x-api-key": api_key,
@@ -45,7 +52,7 @@ def build_request(provider, model, api_key, system, user):
         headers = {"Content-Type": "application/json"}
         body = {"systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
-                "generationConfig": {"temperature": 0.3}}
+                "generationConfig": {"temperature": TEMPERATURE}}
     else:
         raise ValueError("unknown provider: " + provider)
     return url, headers, json.dumps(body).encode("utf-8")
@@ -137,6 +144,31 @@ SYSTEM_CZERNY = SYSTEM + (
 )
 
 
+# Source of each rule is in the project notes: Czerny vol. 3 pp. 22, 28 (confirmed); Forsyth 1914 pp. 185, 187, 197, 439
+# (confirmed in meaning); Berlioz ranges (confirmed for violin, cello, double bass, flute, bassoon). Numbers marked
+# "heuristic" are the project's own and are given to the model as a hint only.
+SYSTEM_STRICT = SYSTEM_CZERNY + (
+    " STRICT RULES. (1) The melody must be played in EVERY bar, always by the same instrument or by two instruments in "
+    "unison/octave. Do NOT hand the melody to another instrument in the middle of a phrase; change the carrier only at a "
+    "phrase border and not more often than once per 4 bars. (2) Every instrument must play at least one phrase, but "
+    "only as doubling or inner voice: never leave an instrument without any part for the whole piece. (3) shift_in_semitones "
+    "is 0, 12 or -12 (24 and -24 only if the range demands it); never a value that is not a multiple of 12. "
+    "(4) The double bass doubles the cello an octave below (bass role), on long notes. (5) Fast figuration only for "
+    "strings, at most two string instruments at a time. (6) Phrases must cover every bar 1..N without gaps. "
+    "(7) Do not put the melody above the range of its instrument: flute and violin I may rise above C6 only in a climax. "
+    "Example of a good phrase (a lyrical passage): "
+    '{"id":1,"bars":[1,4],"kind":"lyric","climax":false,"color":"warm","level":"mp",'
+    '"melody":[["Violin I",0,null,null],["Flute",12,null,null]],"inner1":[["Viola",0,null,null]],'
+    '"inner2":[["Horn",0,null,null]],"bass":[["Cello",0,null,null],["Double Bass",-12,null,null]],'
+    '"figuration":[["Violin II",0,null,null]],"why":["strings carry the tune, flute doubles an octave up, '
+    'horn holds the harmony, bass is cello plus double bass"]}. Answer with JSON only.'
+)
+
+
+def system_text():
+    return SYSTEM_STRICT if STRICT else (SYSTEM_CZERNY if CZERNY else SYSTEM)
+
+
 def describe_piece(meta, melody, events, n_bars):
     """Compact, plain description of the piece for the model (no full note dump)."""
     lines = ["Bars: %d, time signatures: %s" % (n_bars, meta["tsigs"])]
@@ -167,7 +199,7 @@ def plan_with_model(provider, model, api_key, description, n_bars, max_rounds=3,
     log = []
     user = description
     for round_no in range(1, max_rounds + 1):
-        text = call(provider, model, api_key, SYSTEM_CZERNY if CZERNY else SYSTEM, user)
+        text = call(provider, model, api_key, system_text(), user)
         try:
             plan = parse_plan(text)
         except Exception as e:
@@ -209,6 +241,15 @@ def validator_feedback(issues, meta):
     return lines
 
 
+def _gate_defects(in_path, stem, solo):
+    """Defects from the quality gate for a built piece; a failure of the gate itself never stops the planner."""
+    try:
+        import quality_gate
+        return quality_gate.check(in_path, stem + ".mid", solo=bool(solo))["defects"]
+    except Exception:
+        return []
+
+
 def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_model, max_rounds=3, solo=None, percussion=False):
     """Model writes the plan, the orchestrator builds it, the validator checks it, and the model gets the
     validator's findings to fix. Keeps the best attempt. Returns (run_log, issues, names, attempts, plan_path)."""
@@ -218,7 +259,7 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
     description = describe_piece(meta, melody, events, n_bars)
     attempts, best, user = [], None, description
     for r in range(1, max_rounds + 1):
-        text = call(provider, model, api_key, SYSTEM_CZERNY if CZERNY else SYSTEM, user)
+        text = call(provider, model, api_key, system_text(), user)
         try:
             plan = parse_plan(text)
         except Exception as e:
@@ -238,10 +279,15 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
         silent = [] if CZERNY else [i for i in issues if i[1] == "QX06"]
         score = 10 * len(errors) + 2 * len(silent) + sum(1 for i in issues if i[0] == "warning")
         feedback = validator_feedback(issues, meta)
-        attempts.append({"round": r, "errors": len(errors), "score": score, "feedback": feedback})
+        defects = _gate_defects(in_path, stem, solo) if STRICT else []
+        if STRICT:
+            score += 10 * len(defects)
+            feedback = feedback + ["DEFECT %s: %s" % (d[0], d[1]) for d in defects]
+        attempts.append({"round": r, "errors": len(errors), "score": score, "feedback": feedback,
+                         "defects": [d[0] for d in defects]})
         if best is None or score < best["score"]:
-            best = {"score": score, "plan_path": plan_path, "issues": issues, "log": log}
-        if not errors and not silent:
+            best = {"score": score, "plan_path": plan_path, "issues": issues, "log": log, "defects": defects}
+        if not errors and not silent and not defects:
             break
         user = (description + "\n\nThe previous plan was built and checked. Problems found:\n- " +
                 "\n- ".join(feedback) +
@@ -251,6 +297,16 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
                  "keep each instrument in its range, answer with JSON only."))
     if best is None:
         raise RuntimeError("planner produced no valid plan: %s" % attempts[-1])
+    if STRICT and best["defects"]:
+        # still defective after all rounds: the built-in plan replaces the model's plan if it is better
+        fb_stem = out_stem + "_builtin"
+        o.run(in_path, fb_stem, "off", None, solo=solo)
+        fb = _gate_defects(in_path, fb_stem, solo)
+        attempts.append({"round": "builtin", "defects": [d[0] for d in fb], "model_defects": [d[0] for d in best["defects"]]})
+        if len(fb) < len(best["defects"]):
+            log, issues, names = o.run(in_path, out_stem, "off", None, solo=solo, percussion=percussion)
+            attempts.append({"round": "chosen", "plan": "builtin"})
+            return log, issues, names, attempts, out_stem + "_plan.json"
     log, issues, names = o.run(in_path, out_stem, "off", best["plan_path"], solo=solo, percussion=percussion)
     return log, issues, names, attempts, best["plan_path"]
 

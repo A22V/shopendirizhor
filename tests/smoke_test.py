@@ -334,5 +334,27 @@ except Exception as _e:
 print("%-30s %s" % ("запись нот (крошечная пауза)", "OK " if _ok else "FAIL"))
 if not _ok: failed += 1
 
+# строгий режим планировщика (LLM_STRICT): температура 0, правила в инструкции, замечания контроля брака в обратной связи
+try:
+    import importlib, tempfile as _tf, os as _os, json as _js
+    _os.environ["LLM_STRICT"] = "1"
+    import llm_planner as _L
+    importlib.reload(_L)
+    _pl = _os.path.join(_os.path.dirname(__file__), "..", "tests", "pieces", "Waltz_Dmajor_piano_plan_5ce53e16.json")
+    _mid = _os.path.join(_os.path.dirname(__file__), "..", "tests", "pieces", "Waltz_Dmajor_piano.mid")
+    _ok = _L.TEMPERATURE == 0.0 and _js.loads(_L.build_request("deepseek", "m", "k", "s", "u")[2])["temperature"] == 0.0
+    if _ok and _os.path.exists(_pl) and _os.path.exists(_mid):
+        _txt, _calls = open(_pl, encoding="utf-8").read(), []
+        _L.orchestrate_with_llm(_mid, _os.path.join(_tf.mkdtemp(), "w"), "deepseek", "m", "k",
+                                call=lambda p_, m_, k_, s_, u_, **kw: (_calls.append((s_, u_)) or _txt))
+        _ok = "STRICT RULES" in _calls[0][0]
+    _os.environ.pop("LLM_STRICT", None)
+    importlib.reload(_L)
+    _ok = _ok and _L.TEMPERATURE == 0.3
+except Exception as _e:
+    _ok = False; print(_e)
+print("%-30s %s" % ("строгий режим планировщика", "OK " if _ok else "FAIL"))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)
