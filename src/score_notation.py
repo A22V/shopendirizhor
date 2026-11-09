@@ -112,7 +112,8 @@ def _midi_to_musicxml(midi_path):
     shutil.copyfile(midi_path, tmp_in)
     sc = music21.converter.parse(tmp_in)
     out = os.path.join(tempfile.mkdtemp(prefix="notation_"), "score.musicxml")
-    sc.write("musicxml", fp=out)
+    import xml_safe
+    xml_safe.write_musicxml(sc, out)
     return out
 
 

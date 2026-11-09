@@ -319,5 +319,20 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("замер памяти FAIL (исключение)"); traceback.print_exc(); failed += 1
+# запись нот при крошечной паузе (облако 2026-11-09: «2048th duration»): должна выравнивать, а не падать
+try:
+    import music21 as _m, xml_safe as _xs, tempfile as _tf, os as _os
+    _sc = _m.stream.Score(); _pt = _m.stream.Part(); _pt.insert(0, _m.instrument.Flute())
+    _pt.insert(0, _m.note.Note("C5", quarterLength=1/3))
+    _pt.insert(1/3 + 1/1536, _m.note.Note("D5", quarterLength=1 - 1/3 - 1/1536))
+    _sc.insert(0, _pt)
+    _fp = _os.path.join(_tf.mkdtemp(), "t.musicxml")
+    _fx = _xs.write_musicxml(_sc, _fp)
+    _ok = bool(_fx) and len(list(_m.converter.parse(_fp).recurse().notes)) == 2
+except Exception as _e:
+    _ok = False; print(_e)
+print("%-30s %s" % ("запись нот (крошечная пауза)", "OK " if _ok else "FAIL"))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

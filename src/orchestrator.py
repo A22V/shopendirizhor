@@ -708,7 +708,8 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
         log["percussion"] = _perc.add(out_stem + ".mid", meta["bars"], dyn, _clx, meta.get("tsigs"), _bpm)
     written = snd.toWrittenPitch(inPlace=False)
     add_dynamics(written, dyn)   # dynamics must be written into the MusicXML too (MuseScore shows them)
-    written.write("musicxml", fp=out_stem + ".musicxml")
+    import xml_safe
+    log["musicxml_fix"] = xml_safe.write_musicxml(written, out_stem + ".musicxml")
     issues, names = validator.check_score(out_stem + ".musicxml")
     json.dump({"plan_log": log, "issues": issues}, open(out_stem + "_report.json", "w", encoding="utf-8"),
               ensure_ascii=False, indent=2)

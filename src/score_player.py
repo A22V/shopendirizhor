@@ -304,7 +304,8 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
                 part.partName = shown[k]["label"]
                 part.partAbbreviation = shown[k]["label"]
         xml_path = os.path.join(work, "notation.musicxml")
-        sc.write("musicxml", fp=xml_path)
+        import xml_safe
+        xml_safe.write_musicxml(sc, xml_path)
         notation_xml = open(xml_path, encoding="utf-8").read()
         notes.append("Ноты сделаны из MIDI: ритм выровнен по долям приблизительно (как в MuseScore при открытии MIDI).")
     if is_musicxml(data, name):
