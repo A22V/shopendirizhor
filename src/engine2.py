@@ -340,7 +340,8 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
 #  ноты аккорда раздаются голосам без перекрещивания с наименьшим общим сдвигом от их прошлых нот;
 #  голос без новой ноты держит прежнюю, если она ещё звучит и входит в гармонию (а не замолкает посреди фразы);
 #  лишние ноты сверх числа голосов: октавные повторы уже взятого звука опускаются, новые звуки — свободным духовым.
-VOICE_LEGATO = 0.05   # эвристика: «нота ещё звучит», если кончается не раньше чем за 0,05 доли до нового аккорда
+VOICE_LEGATO = 0.05
+NOTE_SKIP = 50.0      # ORCH_KEEP=2: «штраф» за ноту аккорда, не влезшую в голоса (больше любого сдвига голоса)   # эвристика: «нота ещё звучит», если кончается не раньше чем за 0,05 доли до нового аккорда
 
 
 def keep_enabled():
@@ -355,6 +356,7 @@ def voices_enabled():
 
 
 def _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, place, lines, st, key, rescue=None):
+    keep2 = os.environ.get("ORCH_KEEP", "") == "2"
     sizes = sorted(len({acc[i][2] for i in g}) for g in groups)
     if not sizes:
         return
@@ -408,18 +410,25 @@ def _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, pla
             for i in range(1, K + 1):
                 skip = D[j][i - 1]                     # голос i не берёт ноту
                 take = D[j - 1][i - 1] + cost(j - 1, i - 1)
-                if take <= skip:
+                drop = D[j - 1][i] + NOTE_SKIP if keep2 else INF   # ORCH_KEEP=2: нота не влезла — раскладываем остальные
+                best = min(take, skip, drop)
+                if take == best:
                     D[j][i], B[j][i] = take, "take"
-                else:
+                elif skip == best:
                     D[j][i], B[j][i] = skip, "skip"
+                else:
+                    D[j][i], B[j][i] = drop, "drop"
         assign = {}
         if D[m][K] < INF:
             j, i = m, K
+            unplaced = []
             while j > 0:
                 if B[j][i] == "take":
-                    assign[i - 1] = j - 1; j -= 1
-                i -= 1
-            unplaced = []
+                    assign[i - 1] = j - 1; j -= 1; i -= 1
+                elif B[j][i] == "drop":
+                    unplaced.append(notes[j - 1]); j -= 1
+                else:
+                    i -= 1
         else:
             unplaced = list(notes)
         for i, j in assign.items():
@@ -441,6 +450,8 @@ def _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, pla
             off, e, p = x
             done = False
             for n in list(spare):
+                if keep2 and any(abs(y[0] - off) < 0.05 for y in lines[n]):
+                    continue                           # ORCH_KEEP=2: у запасного уже есть нота в этот момент
                 if rng(n)[0] <= p <= rng(n)[1] and place(n, off, e - off, p, "inner2"):
                     done = True; vst[key]["spare"] += 1
                     break
