@@ -283,6 +283,8 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                         q -= 12
                     if place(h, start, end - start, q, "inner1" if h in ("Horn", "Violin II") else "inner2"):
                         st["holds"] += 1
+        elif voices_enabled():
+            _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, place, lines, st, "%d-%d" % (a_, b_))
         else:
             order = [n for n in STRINGS_HIGH_TO_LOW + WINDS_FOR_CHORDS if n in free and n != bass_lit and n != bass_hold]
             if bass_lit == "Cello" and "Cello" in free:
@@ -302,6 +304,121 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                         break
                     st["placed" if done else "dropped"] += 1
     log["engine2"] = st
+
+
+# ---------- голосоведение аккордовых фраз (ORCH_VOICES=1, 2026-11-10, выкл. по умолчанию) ----------
+# ПОДТВЕРЖДЕНО (Римский-Корсаков, «Основы оркестровки», т. 1, гл. III «Гармония», с. 55–56):
+#  «при дурном и неряшливом голосоведении красивой звучности быть не может»;
+#  переход от одного числа гармонических голосов к другому «должен совпадать со сменой мотивов, фраз или предложений»;
+#  бас не заходит внутрь верхних голосов (у нас бас ведут виолончель/контрабас отдельно).
+# ЭВРИСТИКА (способ): число голосов фразы = 75-й процентиль размера аккорда; голоса — струнные сверху вниз, затем духовые;
+#  ноты аккорда раздаются голосам без перекрещивания с наименьшим общим сдвигом от их прошлых нот;
+#  голос без новой ноты держит прежнюю, если она ещё звучит и входит в гармонию (а не замолкает посреди фразы);
+#  лишние ноты сверх числа голосов: октавные повторы уже взятого звука опускаются, новые звуки — свободным духовым.
+VOICE_LEGATO = 0.05   # эвристика: «нота ещё звучит», если кончается не раньше чем за 0,05 доли до нового аккорда
+
+
+def voices_enabled():
+    return os.environ.get("ORCH_VOICES", "") not in ("", "0", "false", "False")
+
+
+def _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, place, lines, st, key):
+    sizes = sorted(len({acc[i][2] for i in g}) for g in groups)
+    if not sizes:
+        return
+    strings = [n for n in STRINGS_HIGH_TO_LOW if n in free and n not in (bass_lit, bass_hold)]
+    winds = [n for n in WINDS_FOR_CHORDS if n in free and n not in (bass_lit, bass_hold)]
+    pool = strings + winds
+    K = max(1, min(len(pool), sizes[min(len(sizes) - 1, int(0.75 * len(sizes)))]))
+    voices = sorted(pool[:K], key=lambda n: -(rng(n)[0] + rng(n)[1]))       # сверху вниз по середине диапазона
+    spare = [n for n in pool if n not in voices]
+    last = {v: None for v in voices}     # [off, dur, pitch, role] — последняя нота голоса
+    vst = st.setdefault("voices", {})
+    vst[key] = {"K": K, "voices": voices, "held": 0, "octave_dup": 0, "spare": 0}
+    for g in groups:
+        s = min(acc[i][0] for i in g)
+        end = max(acc[i][1] for i in g)
+        pcs_now = {acc[i][2] % 12 for i in g}
+        notes = []
+        for i in sorted(g, key=lambda k_: -acc[k_][2]):
+            p = acc[i][2]
+            if any(x[2] == p for x in notes):
+                st["placed"] += 1
+                continue
+            notes.append(acc[i])
+        # больше звуков, чем голосов: сначала опускаем октавные повторы (кроме верхнего и нижнего)
+        while len(notes) > K:
+            dup = [j for j in range(1, len(notes) - 1) if any(notes[j][2] % 12 == notes[t][2] % 12 for t in range(len(notes)) if t != j)]
+            if not dup:
+                break
+            notes.pop(dup[0]); st["placed"] += 1; vst[key]["octave_dup"] += 1
+        extra = []
+        if len(notes) > K:          # новые звуки сверх голосов — свободным духовым (по середине аккорда)
+            keep = [notes[0]] + notes[1:K - 1] + [notes[-1]] if K >= 2 else [notes[0]]
+            extra = [x for x in notes if x not in keep]
+            notes = keep
+        # раздача без перекрещивания: notes[j] -> voices[i_j], i_j строго растёт; минимум суммы сдвигов
+        m, INF = len(notes), float("inf")
+
+        def cost(j, i):
+            v = voices[i]
+            lo, hi = rng(v)
+            p = notes[j][2]
+            if not (lo <= p <= hi):
+                return INF
+            ref = last[v][2] if last[v] else (lo + hi) / 2.0
+            return abs(p - ref) + (0 if last[v] else 0.5)
+        D = [[INF] * (K + 1) for _ in range(m + 1)]
+        B = [[None] * (K + 1) for _ in range(m + 1)]
+        for i in range(K + 1):
+            D[0][i] = 0.0
+        for j in range(1, m + 1):
+            for i in range(1, K + 1):
+                skip = D[j][i - 1]                     # голос i не берёт ноту
+                take = D[j - 1][i - 1] + cost(j - 1, i - 1)
+                if take <= skip:
+                    D[j][i], B[j][i] = take, "take"
+                else:
+                    D[j][i], B[j][i] = skip, "skip"
+        assign = {}
+        if D[m][K] < INF:
+            j, i = m, K
+            while j > 0:
+                if B[j][i] == "take":
+                    assign[i - 1] = j - 1; j -= 1
+                i -= 1
+            unplaced = []
+        else:
+            unplaced = list(notes)
+        for i, j in assign.items():
+            off, e, p = notes[j]
+            if place(voices[i], off, e - off, p, "inner1" if voices[i] in STRINGS_HIGH_TO_LOW else "inner2"):
+                last[voices[i]] = lines[voices[i]][-1]
+                st["placed"] += 1
+            else:
+                unplaced.append(notes[j])
+        # голос без новой ноты держит прежнюю, если она ещё звучит и входит в гармонию
+        for i, v in enumerate(voices):
+            if i in assign or not last[v]:
+                continue
+            L = last[v]
+            if L[0] + L[1] >= s - VOICE_LEGATO and L[2] % 12 in pcs_now:
+                L[1] = max(L[1], end - L[0])
+                vst[key]["held"] += 1
+        for x in extra + unplaced:
+            off, e, p = x
+            done = False
+            for n in list(spare):
+                if rng(n)[0] <= p <= rng(n)[1] and place(n, off, e - off, p, "inner2"):
+                    done = True; vst[key]["spare"] += 1
+                    break
+            if not done:
+                for n in voices:                       # последняя попытка: любой голос, где помещается
+                    if rng(n)[0] <= p <= rng(n)[1] and not any(abs(y[0] - off) < 0.05 for y in lines[n][-3:]):
+                        done = place(n, off, e - off, p, "inner2")
+                        if done:
+                            break
+            st["placed" if done else "dropped"] += 1
 
 
 # ---------- удвоения мелодии (ORCH_DOUBLE=1, 2026-11-10, выкл. по умолчанию) ----------
