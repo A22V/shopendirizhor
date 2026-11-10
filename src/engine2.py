@@ -92,6 +92,31 @@ def _sound_end(end, spans, starts):
     return end
 
 
+def _mean_leap(seq):
+    return sum(abs(y - x) for x, y in zip(seq, seq[1:])) / (len(seq) - 1) if len(seq) > 1 else 0.0
+
+
+def _split_streams(pitches):
+    """Высота, по которой ряд нот делится на два потока с меньшими скачками, или None.
+    Условия (эвристика): средний скачок целого ряда больше 6 полутонов, в каждом потоке не меньше 20% нот,
+    а общий средний скачок после деления (взвешенный по числу нот) меньше 60% от прежнего."""
+    if len(pitches) < 8:
+        return None
+    base = _mean_leap(pitches)
+    if base <= 6.0:
+        return None
+    best, best_cost = None, base * 0.6
+    for sp in sorted(set(pitches))[1:]:
+        lo = [p for p in pitches if p < sp]
+        hi = [p for p in pitches if p >= sp]
+        if min(len(lo), len(hi)) < 0.2 * len(pitches):
+            continue
+        cost = (_mean_leap(lo) * len(lo) + _mean_leap(hi) * len(hi)) / len(pitches)
+        if cost < best_cost:
+            best, best_cost = sp, cost
+    return best
+
+
 def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
     """Заполняет lines сопровождением: каждая нота рояля, не вошедшая в мелодию, отдаётся одному инструменту."""
     starts = [b[0] for b in bars]
@@ -185,10 +210,27 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
             cover = {n: sum(1 for i in rest if rng(n)[0] <= acc[i][2] <= rng(n)[1]) / len(rest) for n in strings}
             primary = next((n for n in ("Viola", "Cello", "Violin II") if cover.get(n, 0) >= 0.85), None)
             st.setdefault("runner", {})["%d-%d" % (a_, b_)] = primary
+            # два голоса рояля («повторяющаяся верхняя нота» и «арпеджио внизу») нельзя склеивать в одну линию
+            # (ноктюрн, такты 12–18, 2026-11-10: альт прыгал 76-55-76-59-76-62, скачок в среднем 9,3 п/т, 36% скачков > октавы).
+            # Делим бегущие ноты фразы по высоте на два потока там, где это не меньше чем на 40% укорачивает средний скачок
+            # (пороги — эвристика); верхний поток отдаётся другому струнному.
+            split_at = _split_streams([acc[i][2] for i in sorted(rest, key=lambda k: acc[k][0])])
+            hi_runner = None
+            if split_at is not None:
+                hi_notes = [acc[i][2] for i in rest if acc[i][2] >= split_at]
+                for n in ("Violin II", "Violin I", "Viola"):
+                    if n in strings and n != primary and all(rng(n)[0] <= x <= rng(n)[1] for x in hi_notes):
+                        hi_runner = n
+                        break
+                if hi_runner is None:
+                    split_at = None
+            st.setdefault("streams", {})["%d-%d" % (a_, b_)] = (split_at, hi_runner)
             for i in rest:
                 s, e, p = acc[i]
                 home = "Cello" if p < BAND_CELLO else ("Viola" if p < BAND_VIOLA else "Violin II")
                 order = ([primary] if primary else []) + [home] + [n for n in ("Viola", "Cello", "Violin II", "Violin I") if n != home]
+                if split_at is not None and p >= split_at:
+                    order = [hi_runner]
                 done = False
                 for n in order:
                     if n in strings and rng(n)[0] <= p <= rng(n)[1]:
