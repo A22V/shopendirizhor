@@ -488,6 +488,8 @@ def realize(s, events, melody, meta, plan):
     if engine2.enabled() and meta.get("notes"):
         _rng = {n: (RANGES[KEY[n]] if KEY[n] in RANGES else EXTRA_RANGES[KEY[n]]) for n in lines}
         engine2.accompany(lines, meta["notes"], melody, plan, meta["bars"], fit, _rng, log, meta.get("pedal"))
+        if engine2.double_enabled() and not owners:   # ORCH_DOUBLE=1: удвоения мелодии по базе (engine2.double_melody)
+            engine2.double_melody(lines, melody, plan, meta["bars"], fit, _rng, log)
     else:
         for e, v in zip(events, voices):
             for role in ("bass", "inner1", "inner2"):

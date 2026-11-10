@@ -302,3 +302,52 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                         break
                     st["placed" if done else "dropped"] += 1
     log["engine2"] = st
+
+
+# ---------- удвоения мелодии (ORCH_DOUBLE=1, 2026-11-10, выкл. по умолчанию) ----------
+# ИЗМЕРЕНО по базе IRCAM (39 пар Bouliane, долгие ноты мелодии рояля ≥ ½ доли): мелодию играют 2 и больше семейств
+# в 54% нот; самые частые пары: гобой+флейта 585, кларнет+флейта 497, скрипки+флейта 461, альт+скрипки 430,
+# гобой+скрипки 412, кларнет+скрипки 365; октава: гобой унисон 74%, скрипки 67%, флейта унисон 54% / октавой выше 29%.
+# ЭВРИСТИКА: сколько удвоителей на уровень (mp 0, mf 1, f 2), порядок выбора, флейта октавой выше при мелодии ниже C5.
+PARTNERS = {"string": ["Oboe", "Flute", "Clarinet"], "wind": ["Violin I", "Flute", "Oboe", "Clarinet", "Violin II"]}
+DOUBLERS_BY_LEVEL = {"mp": 0, "mf": 1, "f": 2}
+
+
+def double_enabled():
+    return os.environ.get("ORCH_DOUBLE", "") not in ("", "0", "false", "False")
+
+
+def double_melody(lines, melody, plan, bars, fit, ranges, log):
+    starts = [b[0] for b in bars]
+    mel_on = [m["offset"] for m in melody]
+    added = {}
+    for ph in plan["phrases"]:
+        want = DOUBLERS_BY_LEVEL.get(ph.get("level", "mp"), 0) + (1 if ph.get("climax") else 0)
+        carriers = [spec[0] for spec in ph.get("melody", [])]
+        if not carriers or want <= 0:
+            continue
+        a_, b_ = ph["bars"]
+        t0 = starts[a_ - 1]
+        t1 = starts[b_] if b_ < len(starts) else starts[-1] + bars[-1][1] + 1e6
+        seg = melody[bisect.bisect_left(mel_on, t0 - 1e-6):bisect.bisect_left(mel_on, t1 - 1e-6)]
+        if not seg:
+            continue
+        mean = sum(m["pitch"] for m in seg) / len(seg)
+        busy = set(carriers) | {n for n, ns in lines.items() if any(t0 - 1e-6 <= x[0] < t1 - 1e-6 for x in ns)}
+        kind = "string" if carriers[0] in ("Violin I", "Violin II", "Viola", "Cello") else "wind"
+        picked = []
+        for n in PARTNERS[kind]:
+            if len(picked) >= want:
+                break
+            if n in busy or n not in lines:
+                continue
+            shift = 12 if n == "Flute" and mean < 72 else 0
+            if all(ranges[n][0] <= m["pitch"] + shift <= ranges[n][1] for m in seg):
+                picked.append((n, shift))
+        for n, shift in picked:
+            for m in seg:
+                f = fit(m["pitch"] + shift, n)
+                if f is not None:
+                    lines[n].append([m["offset"], m["dur"], f, "melody"])
+            added.setdefault("%d-%d" % (a_, b_), []).append(n + ("+8" if shift else ""))
+    log["doubling"] = added
