@@ -458,5 +458,29 @@ except Exception as _e:
 print("%-30s %s  %s" % ("параллельные квинты (П3)", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+try:
+    import tempfile as _tf, mido as _md, numpy as _np, loudness_follow as _lf
+    def _mk5(path, name, notes):
+        m = _md.MidiFile(ticks_per_beat=480); t = _md.MidiTrack(); m.tracks.append(t)
+        t.append(_md.MetaMessage("set_tempo", tempo=500000)); t.append(_md.MetaMessage("track_name", name=name))
+        ev = []
+        for a, b, n in notes:
+            ev += [(a, "on", n), (b, "off", n)]
+        ev.sort(key=lambda x: (x[0], x[1] == "on")); last = 0
+        for tk, k, n in ev:
+            t.append(_md.Message("note_on" if k == "on" else "note_off", note=n, velocity=80 if k == "on" else 0, time=tk - last, channel=0)); last = tk
+        m.save(path)
+    _d5 = _tf.mkdtemp(); _b5 = lambda sec: int(sec * 2 * 480)
+    _mk5(_d5 + "/p.mid", "Piano", [(_b5(i), _b5(i + 1), 60) for i in range(60)])
+    _mk5(_d5 + "/o.mid", "Flute", [(_b5(i), _b5(i + 1), 72) for i in range(60) if not 30 <= i < 32])
+    _cut5, _ = _lf.curve(_d5 + "/p.mid", _d5 + "/o.mid")
+    _boost5 = float(_cut5.max() - _np.median(_cut5))
+    _ok = _boost5 <= 6.0
+    _msg = "тихое место выше соседей на %.1f дБ (допустимо до 6)" % _boost5
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("громкость: тихая секунда", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)
