@@ -77,6 +77,15 @@ def analyze(path):
     for mm in s.recurse().getElementsByClass(tempo.MetronomeMark):
         tempos[round(float(mm.getOffsetInHierarchy(s)), 3)] = mm.number     # last mark at an offset wins
     meta = {"bars": bars, "tsigs": tsigs, "tempos": sorted(tempos.items())}
+    # сила нажатия пианиста по тактам (среднее velocity нот, начавшихся в такте); для ORCH_DYN_PIANO (см. phrase_planner)
+    _vel = {}
+    for pi, p in enumerate(s.parts):
+        for el in p.flatten().notes:
+            v = getattr(getattr(el, "volume", None), "velocity", None)
+            if v is None or not isinstance(el, (note.Note, chord.Chord)) or el.quarterLength <= 0: continue
+            bi = bar_of([b_[0] for b_ in bars], float(el.offset))
+            _vel.setdefault(bi, []).append(v)
+    meta["bar_velocity"] = {bi: sum(v) / len(v) for bi, v in _vel.items()}
     by_part = {}
     for n in allnotes: by_part.setdefault(n[3], []).append(n[2])
     top_pi = max(by_part, key=lambda k: sum(by_part[k]) / len(by_part[k]))

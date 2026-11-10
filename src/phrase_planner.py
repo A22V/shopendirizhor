@@ -196,6 +196,28 @@ def phrase_levels(phrases):
     return [LEVELS[x] for x in out]
 
 
+def velocity_levels(phrases, bar_velocity):
+    """Уровень фразы по средней силе нажатия пианиста в её тактах; соседние фразы отличаются не больше чем на шаг."""
+    means = []
+    for p in phrases:
+        a, b = p["bars"]
+        vs = [bar_velocity[bi] for bi in range(a - 1, b) if bi in bar_velocity]
+        means.append(sum(vs) / len(vs) if vs else None)
+    valid = [m for m in means if m is not None]
+    if not valid: return phrase_levels(phrases)
+    lo, hi = min(valid), max(valid)
+    raw = []
+    for p, m in zip(phrases, means):
+        x = 0.5 if m is None or hi - lo < 4 else (m - lo) / (hi - lo)
+        r = 0 if x < 0.33 else 1 if x < 0.66 else 2
+        raw.append(2 if p["climax"] else r)
+    out = [raw[0]]
+    for r in raw[1:]:
+        cur = out[-1]
+        out.append(r if abs(r - cur) <= 1 else cur + (1 if r > cur else -1))
+    return [LEVELS[x] for x in out]
+
+
 def make_plan(s, events, melody, meta):
     feats = bar_features(melody, meta)
     ranges, score = detect_phrases(feats)
@@ -313,6 +335,12 @@ def make_plan(s, events, melody, meta):
         if p.get("color") == "cello+bassoon" and p.get("inner1") and p["inner1"][0][0] == "Clarinet":
             p["inner1"] = [["Viola", 0, 0.0]]
     levels = phrase_levels(phrases)
+    if os.environ.get("ORCH_DYN_PIANO", "") not in ("", "0", "false", "False") and meta.get("bar_velocity"):
+        # ORCH_DYN_PIANO=1 (2026-11-10, выкл. по умолчанию): громкость фразы берётся из силы нажатия пианиста
+        # (измерение из файла), а не из высоты мелодии. Повод: тестовая пьеса, финал Vivace у рояля самый громкий
+        # (нажатие 84–100), план дал «mp» -> провал громкости в оркестре со второй минуты (замер по MP3: −17 дБ у рояля,
+        # −27…−31 дБ у оркестра). Шкала: трети между самой тихой и самой громкой фразой (эвристика); кульминация = f.
+        levels = velocity_levels(phrases, meta["bar_velocity"])
     for p, lv in zip(phrases, levels):
         p["level"] = lv
         p.pop("_pit", None); p.pop("_nps", None); p.pop("_fast", None)
