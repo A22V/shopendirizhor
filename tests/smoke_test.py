@@ -370,5 +370,35 @@ except Exception as _e:
 print("%-30s %s" % ("распознавание арпеджио", "OK " if _ok else "FAIL"))
 if not _ok: failed += 1
 
+# движок 2 «нота в ноту» (ORCH_ENGINE=2): все ноты сопровождения розданы, оркестр играет не меньше 90% нот рояля в их момент
+try:
+    import tempfile as _tf2, os as _os2, bisect as _bs, mido as _md
+    import orchestrator as _o2
+    _src = _os2.path.join(_os2.path.dirname(__file__), "..", "input", "nocturneincsharpminor.mid")
+    _stem = _os2.path.join(_tf2.mkdtemp(), "e2")
+    _os2.environ["ORCH_ENGINE"] = "2"
+    try:
+        _log2, _, _ = _o2.run(_src, _stem)
+    finally:
+        _os2.environ.pop("ORCH_ENGINE", None)
+    def _ns(path):
+        m_ = _md.MidiFile(path); out_ = []
+        for tr_ in m_.tracks:
+            t_ = 0
+            for x_ in tr_:
+                t_ += x_.time
+                if x_.type == "note_on" and x_.velocity > 0: out_.append((t_ / m_.ticks_per_beat, x_.note % 12))
+        return sorted(out_)
+    _pn, _on = _ns(_src), _ns(_stem + ".mid")
+    _os_ = [x_[0] for x_ in _on]
+    _hit = sum(1 for t_, pc_ in _pn if any(q_ == pc_ for _, q_ in _on[_bs.bisect_left(_os_, t_ - 0.13):_bs.bisect_right(_os_, t_ + 0.13)]))
+    _e2 = _log2["engine2"]
+    _ok = _e2["dropped"] == 0 and _hit / len(_pn) >= 0.9
+    _msg = "нот рояля сыграно %d%%, пропущено %d, тянущихся нот %d" % (round(100 * _hit / len(_pn)), _e2["dropped"], _e2["holds"])
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("движок 2 «нота в ноту»", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

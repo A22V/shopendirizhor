@@ -150,6 +150,21 @@ def analyze(path):
             fig.append({"offset": n[0], "dur": n[1] - n[0], "pitch": n[2]})
     fig.sort(key=lambda f: f["offset"])
     meta["fig"] = fig
+    import engine2
+    if engine2.enabled():
+        # ORCH_ENGINE=2 (проба, выкл. по умолчанию): сопровождение — переложение нота в ноту (src/engine2.py).
+        meta["notes"] = allnotes
+        meta["pedal"] = engine2.read_pedal(path)
+        melody = engine2.find_melody(allnotes)
+        for i in range(len(melody) - 1):
+            gap = melody[i + 1]["offset"] - melody[i]["offset"]
+            if melody[i]["dur"] > gap: melody[i]["dur"] = gap
+        melody, _extra, _rep = split_arpeggio(melody, [])
+        meta["texture"] = _rep
+        for e in events:
+            m_on = [m for m in melody if m["offset"] <= e["offset"] + 0.999 and m["offset"] + m["dur"] > e["offset"]]
+            e["melody"] = max(m_on, key=lambda m: m["offset"])["pitch"] if m_on else None
+        return s, events, melody, meta
     if os.environ.get("ORCH_TEXTURE", "") not in ("", "0", "false", "False"):
         melody, _extra, _rep = split_arpeggio(melody, fig)
         meta["fig"] = sorted(fig + _extra, key=lambda f: f["offset"])
@@ -460,12 +475,17 @@ def realize(s, events, melody, meta, plan):
             lines[name].append([m["offset"], m["dur"], fitted, "melody"])
     else:
         for m in melody: put(m["offset"], m["dur"], m["pitch"], "melody")
-    for e, v in zip(events, voices):
-        for role in ("bass", "inner1", "inner2"):
-            if role in v:
-                put(e["offset"], e["dur"], v[role], role)
-                if role != "bass": put(e["offset"], e["dur"], v[role], "pad" + role[-1])   # pads: see hold_pads
-    for f in meta["fig"]: put(f["offset"], f["dur"], f["pitch"], "figuration")
+    import engine2
+    if engine2.enabled() and meta.get("notes"):
+        _rng = {n: (RANGES[KEY[n]] if KEY[n] in RANGES else EXTRA_RANGES[KEY[n]]) for n in lines}
+        engine2.accompany(lines, meta["notes"], melody, plan, meta["bars"], fit, _rng, log, meta.get("pedal"))
+    else:
+        for e, v in zip(events, voices):
+            for role in ("bass", "inner1", "inner2"):
+                if role in v:
+                    put(e["offset"], e["dur"], v[role], role)
+                    if role != "bass": put(e["offset"], e["dur"], v[role], "pad" + role[-1])   # pads: see hold_pads
+        for f in meta["fig"]: put(f["offset"], f["dur"], f["pitch"], "figuration")
     for name in lines: lines[name].sort(key=lambda n: n[0])
     for name, seq in lines.items():                  # a single instrument can't sound two notes at once
         for i in range(len(seq) - 1):
