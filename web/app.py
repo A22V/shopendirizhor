@@ -128,6 +128,7 @@ def checked_midi(f, what="Файл"):
 
 def any_file(label, key):
     """Файл из своей кнопки (основной путь) или из штатной загрузки Streamlit (запасной путь)."""
+    key = "%s_%d" % (key, st.session_state.get("reset_n", 0))      # после «Начать заново» кнопки создаются заново, пустыми
     f = picker.pick(label, key)
     with st.expander("Запасная кнопка загрузки (если основная не сработала)"):
         g = st.file_uploader("Обычная загрузка Streamlit", accept_multiple_files=False, key=key + "_native")
@@ -136,6 +137,33 @@ def any_file(label, key):
 
 up = checked_midi(any_file("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ", "piece"))
 picker.diagnostics()
+
+
+def reset_all():
+    """«Начать заново»: забыть файлы, результат и настройки этой сессии, стереть её задание на сервере."""
+    _j = st.session_state.get("job")
+    try:
+        _q = st.query_params.get("job")
+        _j = _j or (_q if isinstance(_q, str) else None)
+    except Exception:
+        pass
+    if _j:
+        jobs.forget(_j)
+    n = st.session_state.get("reset_n", 0) + 1
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
+    st.session_state["reset_n"] = n
+    st.session_state["bq_opened"] = True            # занавес второй раз не раздвигаем
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+    st.rerun()
+
+
+if st.button("🧹 Начать заново (стереть файлы и результат)", help="Забывает загруженные файлы, результат и настройки; "
+             "с сервера стирается ваша оркестровка. Исходные файлы на вашем телефоне или компьютере не трогаются."):
+    reset_all()
 
 
 def source_mp3(data: bytes):

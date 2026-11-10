@@ -122,6 +122,15 @@ def alive(k):
         return k in _RUNNING
 
 
+def forget(k):
+    """Стереть файлы задания k (если оно не идёт прямо сейчас)."""
+    with _LOCK:
+        if k in _RUNNING:
+            return False
+    shutil.rmtree(_dir(k), ignore_errors=True)
+    return True
+
+
 def cleanup(max_hours=KEEP_HOURS):
     try:
         now = time.time()
