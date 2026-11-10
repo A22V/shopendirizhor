@@ -158,6 +158,24 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
         lines[name].append([off, dur, f, role])
         return True
 
+    keep = keep_enabled()
+
+    def taken_at(name, off):
+        return any(abs(x[0] - off) < 0.05 for x in lines[name])
+
+    def rescue(off, dur, p, free_now):
+        """ORCH_KEEP: нота, которую некому было отдать, — свободному инструменту без своей ноты в этот момент;
+        слишком низкая уходит к контрабасу/виолончели (fit переносит на октаву вверх)."""
+        if not keep:
+            return False
+        order = ["Double Bass", "Cello", "Bassoon"] if p < 48 else \
+            ["Viola", "Violin II", "Violin I", "Cello", "Clarinet", "Oboe", "Flute", "Horn", "Bassoon"]
+        for n in order:
+            if n in lines and n in free_now and not taken_at(n, off) and place(n, off, dur, p, "inner2"):
+                st["rescued"] = st.get("rescued", 0) + 1
+                return True
+        return False
+
     mel_on = [m["offset"] for m in melody]
 
     def melody_at(t):
@@ -200,6 +218,8 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                 place(bass_hold, s, max(e, min(nxt, snd[i], s + 8.0)) - s, p, "bass")
                 ok = True
             st["bass"] += 1
+            if not ok:
+                ok = rescue(s, e - s, p, free)
             st["placed" if ok else "dropped"] += 1
         used = {bass_lit, bass_hold}
         if mode == "figure":
@@ -233,14 +253,16 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                     order = [hi_runner]
                 done = False
                 for n in order:
-                    if n in strings and rng(n)[0] <= p <= rng(n)[1]:
+                    if n in strings and rng(n)[0] <= p <= rng(n)[1] and not (keep and taken_at(n, s)):
                         done = place(n, s, e - s, p, "figuration"); used.add(n)
                         break
                 if not done:
                     for n in winds:
-                        if rng(n)[0] <= p <= rng(n)[1]:
+                        if rng(n)[0] <= p <= rng(n)[1] and not (keep and taken_at(n, s)):
                             done = place(n, s, e - s, p, "figuration"); used.add(n)
                             break
+                if not done:
+                    done = rescue(s, e - s, p, free)
                 st["placed" if done else "dropped"] += 1
             # --- «педаль»: духовые держат ноты аккорда, пока звучит педаль (нет педали в файле — такт)
             holders = [n for n in ("Horn", "Bassoon", "Violin II", "Clarinet", "Oboe") if n in free and n not in used][:MAX_HOLDERS]
@@ -284,7 +306,8 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                     if place(h, start, end - start, q, "inner1" if h in ("Horn", "Violin II") else "inner2"):
                         st["holds"] += 1
         elif voices_enabled():
-            _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, place, lines, st, "%d-%d" % (a_, b_))
+            _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, place, lines, st, "%d-%d" % (a_, b_),
+                          rescue=lambda o_, d_, p_: rescue(o_, d_, p_, free))
         else:
             order = [n for n in STRINGS_HIGH_TO_LOW + WINDS_FOR_CHORDS if n in free and n != bass_lit and n != bass_hold]
             if bass_lit == "Cello" and "Cello" in free:
@@ -302,6 +325,8 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                         done = place(n, s, e - s, p, "inner1" if n in STRINGS_HIGH_TO_LOW else "inner2")
                         took.add(n)
                         break
+                    if not done:
+                        done = rescue(s, e - s, p, free)
                     st["placed" if done else "dropped"] += 1
     log["engine2"] = st
 
@@ -318,11 +343,18 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
 VOICE_LEGATO = 0.05   # эвристика: «нота ещё звучит», если кончается не раньше чем за 0,05 доли до нового аккорда
 
 
+def keep_enabled():
+    """ORCH_KEEP=1 (2026-11-10, выкл. по умолчанию): ни одна нота рояля не теряется — см. rescue() в accompany.
+    Слишком низкие ноты (ниже диапазона контрабаса/виолончели) переносятся на октаву вверх (Форсайт с. 439
+    «keep the Basses up» — смысл); одновременные ноты бегущей фигуры не отдаются одному инструменту. Эвристика."""
+    return os.environ.get("ORCH_KEEP", "") not in ("", "0", "false", "False")
+
+
 def voices_enabled():
     return os.environ.get("ORCH_VOICES", "") not in ("", "0", "false", "False")
 
 
-def _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, place, lines, st, key):
+def _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, place, lines, st, key, rescue=None):
     sizes = sorted(len({acc[i][2] for i in g}) for g in groups)
     if not sizes:
         return
@@ -418,6 +450,8 @@ def _voice_chords(groups, acc, idx, is_bass, free, bass_lit, bass_hold, rng, pla
                         done = place(n, off, e - off, p, "inner2")
                         if done:
                             break
+            if not done and rescue:
+                done = rescue(off, e - off, p)
             st["placed" if done else "dropped"] += 1
 
 
