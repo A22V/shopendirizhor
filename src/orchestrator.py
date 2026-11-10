@@ -150,7 +150,40 @@ def analyze(path):
             fig.append({"offset": n[0], "dur": n[1] - n[0], "pitch": n[2]})
     fig.sort(key=lambda f: f["offset"])
     meta["fig"] = fig
+    if os.environ.get("ORCH_TEXTURE", "") not in ("", "0", "false", "False"):
+        melody, _extra, _rep = split_arpeggio(melody, fig)
+        meta["fig"] = sorted(fig + _extra, key=lambda f: f["offset"])
+        meta["texture"] = _rep
+        for e in events:                       # у тактов «только арпеджио» мелодии нет
+            m_on = [m for m in melody if m["offset"] <= e["offset"] + 0.999 and m["offset"] + m["dur"] > e["offset"]]
+            if not m_on: e["melody"] = None
     return s, events, melody, meta
+
+def split_arpeggio(melody, fig):
+    """ORCH_TEXTURE=1 (выкл. по умолчанию): «мелодия» из самых высоких нот каждой доли в арпеджио оказывается зигзагом
+    по аккорду (Шопен, 2026-11-10: 63% нот короче ½ доли, 45% смен направления, 36% скачков больше кварты).
+    Такие куски переносятся из мелодии в бегущее сопровождение (его играют струнные, Черни с. 22); долгие ноты над
+    арпеджио остаются мелодией. Признак арпеджио (ЭВРИСТИКА, пороги не взяты из книг): подряд короткие ноты
+    (длина < 0,6 доли, до следующей ноты не больше 1 доли), и либо не меньше 4 нот, где больше 55% шагов больше
+    2 полутонов, либо ровно 3 ноты со всеми шагами от 4 полутонов (гамма и мелодия шагами по 1–2 полутона под признак
+    не попадают). Возвращает (мелодия, сопровождение, отчёт)."""
+    n = len(melody)
+    GAP = 1.0
+    short = [melody[i]["dur"] < 0.6 for i in range(n)]
+    moved, runs, i = set(), 0, 0
+    while i < n:
+        if not short[i]:
+            i += 1; continue
+        j = i
+        while j + 1 < n and short[j + 1] and melody[j + 1]["offset"] - melody[j]["offset"] <= GAP: j += 1
+        steps = [abs(melody[k + 1]["pitch"] - melody[k]["pitch"]) for k in range(i, j)]
+        size = j - i + 1
+        if (size >= 4 and sum(1 for x in steps if x > 2) / len(steps) > 0.55) or (size == 3 and all(x >= 4 for x in steps)):
+            moved.update(range(i, j + 1)); runs += 1
+        i = j + 1
+    keep = [m for k, m in enumerate(melody) if k not in moved]
+    extra = [{"offset": melody[k]["offset"], "dur": melody[k]["dur"], "pitch": melody[k]["pitch"]} for k in sorted(moved)]
+    return keep, extra, {"melody_before": n, "melody_after": len(keep), "moved_to_figuration": len(extra), "stretches": runs}
 
 def bar_dynamics(melody, meta):
     """Smoothed dynamics from melody height: moving average, 3 levels, one step at a time, min 2 bars hold."""
@@ -689,6 +722,7 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
     json.dump(plan, open(out_stem + "_plan.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     lines, log = realize(s, events, melody, meta, plan)
     if thin_changes: log["thin_changes"] = thin_changes
+    if meta.get("texture"): log["texture"] = meta["texture"]
     if solo: log["solo"] = {"instrument": solo, "changes": solo_changes}
     dyn = {bi: ph["level"] for ph in plan["phrases"] for bi in range(ph["bars"][0] - 1, ph["bars"][1])}
     log["dynamics_by_bar"] = {b + 1: d for b, d in sorted(dyn.items())}

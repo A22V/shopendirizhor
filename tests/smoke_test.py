@@ -356,5 +356,19 @@ except Exception as _e:
 print("%-30s %s" % ("строгий режим планировщика", "OK " if _ok else "FAIL"))
 if not _ok: failed += 1
 
+# распознавание арпеджио в «мелодии» (ORCH_TEXTURE): зигзаг по аккорду уходит в сопровождение, гамма и долгие ноты остаются
+try:
+    import orchestrator as _o
+    _arp = [{"offset": i * 0.33, "dur": 0.3, "pitch": p_} for i, p_ in enumerate([37, 44, 49, 53, 56, 61, 65, 61, 56, 53])]
+    _scale = [{"offset": 10 + i * 0.5, "dur": 0.45, "pitch": 72 + k} for i, k in enumerate([0, 2, 4, 5, 7, 9, 11, 12])]
+    _long = [{"offset": 20 + i * 2.0, "dur": 1.9, "pitch": 80 - i} for i in range(3)]
+    _mel = _arp + _scale + _long
+    _keep, _extra, _rep = _o.split_arpeggio(_mel, [])
+    _ok = len(_extra) == len(_arp) and len(_keep) == len(_scale) + len(_long) and _rep["stretches"] == 1
+except Exception as _e:
+    _ok = False; print(_e)
+print("%-30s %s" % ("распознавание арпеджио", "OK " if _ok else "FAIL"))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)
