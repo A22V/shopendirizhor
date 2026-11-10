@@ -140,18 +140,20 @@ def prepare(musicxml_path=None, midi_path=None, staff_names=None):
     text = raw.decode("utf-8", errors="replace")
     clean = score_player.decode_xml(raw)
     slim = re.sub(r"<!--.*?-->", "", clean, flags=re.S)
-    tried, loaded = [], False
+    tried, seen, loaded, why = [], [], False, ""
     for label, variant in (("как есть", text), ("без DOCTYPE и BOM", clean), ("без комментариев", slim)):
-        if variant in [v for _, v in tried]:
+        if variant in seen:
             continue
-        tried.append((label, variant))
+        seen.append(variant)
         tk = verovio.toolkit()
         tk.setOptions(OPTIONS)
-        if tk.loadData(variant):
+        ok, why = score_player.load_verovio(tk, variant)
+        if ok:
             loaded = True
             break
+        tried.append((label, None))
     if not loaded:
-        log = (tk.getLog() or "").strip()[-600:]
+        log = why or (tk.getLog() or "").strip()[-600:]
         raise ValueError("verovio не смог прочитать MusicXML (размер %d байт; версия verovio %s; пробовал: %s; причина из verovio: %s)"
                          % (len(raw), tk.getVersion(), ", ".join(l for l, _ in tried), log or "не указана"))
     root = ET.fromstring(tk.getMEI())

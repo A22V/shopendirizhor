@@ -204,6 +204,29 @@ def is_musicxml(data, name=""):
             or b"<score-partwise" in head or b"<score-timewise" in head)
 
 
+
+def load_verovio(tk, text):
+    """tk.loadData с перехватом сообщений verovio: библиотека пишет причину отказа в системный поток ошибок,
+    а не в getLog(). Возвращает (ok, текст сообщений). Звук и ноты не меняет."""
+    import sys
+    fd_err = sys.__stderr__.fileno() if sys.__stderr__ else 2
+    cap = tempfile.TemporaryFile(mode="w+b")
+    try:
+        saved = os.dup(fd_err)
+        os.dup2(cap.fileno(), fd_err)
+        try:
+            ok = tk.loadData(text)
+        finally:
+            os.dup2(saved, fd_err)
+            os.close(saved)
+    except OSError:
+        ok = tk.loadData(text)
+    cap.seek(0)
+    msg = cap.read().decode("utf-8", "replace").strip()
+    cap.close()
+    return ok, msg[-400:]
+
+
 def prepare(data, name="score.mid", page_width=1500, scale=34):
     """Готовит всё для страницы проигрывателя. Возвращает dict (см. начало файла). Ошибки не прячет."""
     import music21
@@ -326,21 +349,25 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
     # Несколько попыток (в облаке verovio молча отказывал на MusicXML от music21): без BOM и DOCTYPE;
     # как есть; без комментариев; в конце music21 перезаписывает ноты заново.
     clean = decode_xml(notation_xml.encode("utf-8"))
-    tried, ok = [], False
+    tried, seen, ok = [], [], False
     for label, variant in (("без DOCTYPE", clean), ("как есть", notation_xml),
                            ("без комментариев", re.sub(r"<!--.*?-->", "", clean, flags=re.S))):
-        if any(variant == v for _, v in tried):
+        if variant in seen:
             continue
-        tried.append((label, variant))
-        if tk.loadData(variant):
-            ok = True
+        seen.append(variant)
+        ok, _msg = load_verovio(tk, variant)
+        if ok:
+            tried.append((label, None))
             break
+        tried.append(("%s (verovio: %s)" % (label, _msg) if _msg else label, None))
     if not ok:
         try:
             alt = os.path.join(work, "again.musicxml")
             music21.converter.parseData(clean, format="musicxml").write("musicxml", fp=alt)
             tried.append(("перезапись music21", None))
-            ok = tk.loadData(decode_xml(open(alt, "rb").read()))
+            ok, _msg = load_verovio(tk, decode_xml(open(alt, "rb").read()))
+            if not ok and _msg:
+                tried.append(("перезапись: verovio: " + _msg, None))
             if ok:
                 notes.append("Ноты пришлось перезаписать (исходный MusicXML распознаватель не принял).")
         except Exception as e:
