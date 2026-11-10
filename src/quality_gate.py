@@ -15,6 +15,9 @@
   Б4 «Молчащий инструмент»: инструмент состава без единой ноты. Измерение; брак — по решению пользователя
      («ожидаются все инструменты», 2026-11-06).
   Б5 «Длительность»: оркестровка короче или длиннее оригинала больше чем на 3% (порог — эвристика).
+  П3 (предупреждение, 2026-11-10) «Параллельные квинты, которых нет у фортепиано»: два инструмента идут квинтами
+     в одну сторону, а в нотах рояля в эти моменты нет обоих звуков. Запрет параллельных квинт — Римский-Корсаков,
+     «Практический учебник гармонии», §13; квинты композитора не считаются (их оркестровка лишь повторяет).
   П1 (предупреждение) «Мелодию перекрывают сверху»: доля нот мелодии, над которыми звучит инструмент,
      не играющий мелодию. Эвристика (смысл: мелодия должна быть слышна, Римский-Корсаков гл. II, правило G02
      проекта); порог 25% — эвристика.
@@ -105,6 +108,32 @@ def melody_of(piano_path):
     return [(m["offset"], m["offset"] + m["dur"], m["pitch"]) for m in mel]
 
 
+def _new_fifths(O, p_on, p_starts):
+    """Параллельные квинты между двумя инструментами (оба меняют ноту в одни и те же моменты, квинта до и после,
+    движение в одну сторону), если у фортепиано в эти моменты нет обоих звуков (иначе это квинта композитора)."""
+    by = collections.defaultdict(dict)
+    for s, e, p, n in O:
+        k = round(s, 3)
+        by[n][k] = max(p, by[n].get(k, -1))
+    def piano_pcs(t):
+        i = bisect.bisect_left(p_starts, t + TOL)
+        return {q % 12 for (s2, e2, q, _) in p_on[:i] if e2 > t - TOL}
+    names = sorted(by)
+    found, total = [], 0
+    for a in range(len(names)):
+        for b in range(a + 1, len(names)):
+            A, B = by[names[a]], by[names[b]]
+            common = sorted(set(A) & set(B))
+            for t0, t1 in zip(common, common[1:]):
+                a0, b0, a1, b1 = A[t0], B[t0], A[t1], B[t1]
+                if a0 == a1 or abs(a0 - b0) % 12 != 7 or abs(a1 - b1) % 12 != 7 or (a1 - a0) * (b1 - b0) <= 0:
+                    continue
+                total += 1
+                if not ({a0 % 12, b0 % 12} <= piano_pcs(t0) and {a1 % 12, b1 % 12} <= piano_pcs(t1)):
+                    found.append((t1, names[a], names[b]))
+    return found, total
+
+
 def check(piano_path, orch_path, melody=None, solo=False):
     """Возвращает {"ok": bool, "defects": [(код, текст, статус)], "warnings": [...], "stats": {...}}."""
     P, _, p_len, pedal, bpb = _notes(piano_path)
@@ -186,6 +215,16 @@ def check(piano_path, orch_path, melody=None, solo=False):
     elif silent:
         defects.append(("Б4", "Не играют ни одной ноты: %s." % ", ".join(RU.get(n, n) for n in silent),
                         "измерение; брак по решению пользователя (нужен полный состав)"))
+
+    # П3 параллельные квинты, которых нет у фортепиано (2026-11-10)
+    new5, all5 = _new_fifths(O, p_on, p_starts)
+    stats["parallel_fifths"] = {"total": all5, "not_in_piano": len(new5)}
+    if new5:
+        warnings.append(("П3", "Параллельные квинты, которых нет в нотах фортепиано: %d (%s; такты %s)."
+                         % (len(new5), ", ".join(sorted({"%s–%s" % (RU.get(a, a), RU.get(b, b)) for _, a, b in new5})[:4]),
+                            _bars([t for t, _, _ in new5], bpb)),
+                         "измерение; правило — Римский-Корсаков, «Практический учебник гармонии», §13 (с. 22–23); "
+                         "квинты от октавных удвоений «не имеют значения» (Основы оркестровки, т. 1, с. 56)"))
 
     # Б5 длительность
     stats["seconds"] = {"piano": round(p_len, 1), "orchestra": round(o_len, 1)}

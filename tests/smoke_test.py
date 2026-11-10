@@ -429,5 +429,34 @@ except Exception as _e:
 print("%-30s %s  %s" % ("громкость за роялем", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- контроль брака: параллельные квинты, которых нет у фортепиано (П3) ---
+try:
+    import tempfile as _tf4, os as _os4, mido as _md4
+    import quality_gate as _qg4
+    _d4 = _tf4.mkdtemp()
+    def _mk(path, tracks):
+        m_ = _md4.MidiFile(type=1, ticks_per_beat=480)
+        for name_, notes_ in tracks:
+            tr_ = _md4.MidiTrack(); tr_.append(_md4.MetaMessage("track_name", name=name_)); m_.tracks.append(tr_)
+            ev_ = []
+            for st_, p_ in notes_:
+                ev_ += [(st_ * 480, 1, p_), ((st_ + 1) * 480, 0, p_)]
+            t_ = 0
+            for tt_, on_, p_ in sorted(ev_):
+                tr_.append(_md4.Message("note_on" if on_ else "note_off", note=p_, velocity=80 if on_ else 0, time=tt_ - t_)); t_ = tt_
+        m_.save(path)
+    _pp, _bad, _good = (_os4.path.join(_d4, x) for x in ("p.mid", "bad.mid", "good.mid"))
+    _mk(_pp, [("Piano", [(0, 60), (0, 64), (1, 62), (1, 65)])])                      # до-ми, ре-фа
+    _mk(_bad, [("Violin I", [(0, 67), (1, 69)]), ("Viola", [(0, 60), (1, 62)])])      # соль-ля над до-ре: квинты
+    _mk(_good, [("Violin I", [(0, 64), (1, 65)]), ("Viola", [(0, 60), (1, 62)])])     # ми-фа над до-ре: терции
+    _rb = _qg4.check(_pp, _bad, melody=[]); _rg = _qg4.check(_pp, _good, melody=[])
+    _ok = _rb["stats"]["parallel_fifths"]["not_in_piano"] == 1 and _rg["stats"]["parallel_fifths"]["not_in_piano"] == 0 \
+        and any(w[0] == "П3" for w in _rb["warnings"])
+    _msg = "квинты найдены %d / в правильном примере %d" % (_rb["stats"]["parallel_fifths"]["not_in_piano"], _rg["stats"]["parallel_fifths"]["not_in_piano"])
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("параллельные квинты (П3)", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)
