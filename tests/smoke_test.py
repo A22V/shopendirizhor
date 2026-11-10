@@ -400,5 +400,34 @@ except Exception as _e:
 print("%-30s %s  %s" % ("движок 2 «нота в ноту»", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- громкость оркестра следует за роялем (ORCH_FOLLOW) ---
+try:
+    import tempfile as _tf3, os as _os3, mido as _md3
+    import orchestrator as _o3
+    _src = _os3.path.join(_os3.path.dirname(__file__), "..", "input", "nocturneincsharpminor.mid")
+    _d3 = _tf3.mkdtemp()
+    _o3.run(_src, _os3.path.join(_d3, "off"))
+    _os3.environ["ORCH_FOLLOW"] = "1"
+    try:
+        _l3, _, _ = _o3.run(_src, _os3.path.join(_d3, "on"))
+    finally:
+        _os3.environ.pop("ORCH_FOLLOW", None)
+    def _cnt(path, ctl):
+        n_ = 0
+        for tr_ in _md3.MidiFile(path).tracks:
+            for x_ in tr_:
+                if ctl and x_.type == "control_change" and x_.control == 11: n_ += 1
+                if not ctl and x_.type == "note_on" and x_.velocity > 0: n_ += 1
+        return n_
+    _same_notes = _cnt(_os3.path.join(_d3, "off.mid"), False) == _cnt(_os3.path.join(_d3, "on.mid"), False)
+    _cc_off, _cc_on = _cnt(_os3.path.join(_d3, "off.mid"), True), _cnt(_os3.path.join(_d3, "on.mid"), True)
+    _fl = _l3.get("loudness_follow", {})
+    _ok = _same_notes and _cc_off == 0 and _cc_on > 0 and "error" not in _fl
+    _msg = "нот поровну, CC11 без переключателя %d, с ним %d, убавление до %s дБ" % (_cc_off, _cc_on, _fl.get("cut_min_db"))
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("громкость за роялем", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

@@ -766,6 +766,12 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
         log["loudness_balance"] = auto_balance(out_stem + ".mid")
     except Exception as e:
         log["loudness_balance"] = {"error": str(e)}
+    try:
+        import loudness_follow
+        if loudness_follow.enabled():   # ORCH_FOLLOW=1: orchestra loudness follows the piano's (src/loudness_follow.py)
+            log["loudness_follow"] = loudness_follow.apply(in_path, out_stem + ".mid")
+    except Exception as e:
+        log["loudness_follow"] = {"error": str(e)}
     if percussion:   # light percussion for rhythm (src/percussion.py); added AFTER loudness balance so drums stay soft
         import percussion as _perc
         _clx = {ph["bars"][0] - 1 for ph in plan["phrases"] if ph.get("climax")}
