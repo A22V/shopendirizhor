@@ -499,5 +499,24 @@ except Exception as _e:
 print("%-30s %s  %s" % ("плавность (legato, ramp)", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+try:
+    import ensemble as _en, quality_gate as _qg5, mido as _md5, tempfile as _tf5
+    _src5 = os.path.join(ROOT, "input", "k545_piano_excerpt.mid")
+    _d6 = _tf5.mkdtemp(); _bad5 = []
+    for _k in _en.ENSEMBLES:
+        _r = _en.arrange(_src5, os.path.join(_d6, _k), _k)
+        _g = _qg5.check(_src5, os.path.join(_d6, _k + ".mid"), melody=None)["stats"]["foreign"]
+        _m = _md5.MidiFile(os.path.join(_d6, _k + ".mid"))
+        _names = [t.name for t in _m.tracks[1:]]
+        _want = len(_en.ENSEMBLES[_k]["voices"]) + (1 if _en.ENSEMBLES[_k]["piano"] else 0)
+        if _g["bad"] or len(_names) != _want or _r["played_share"] < (0.85 if _k == "duo_violin_cello" else 0.95):
+            _bad5.append("%s: чужих %d, дорожек %d из %d, сыграно %.0f%%" % (_k, _g["bad"], len(_names), _want, 100 * _r["played_share"]))
+    _ok = not _bad5
+    _msg = "составов %d, чужих нот 0, ноты рояля сыграны" % len(_en.ENSEMBLES) if _ok else "; ".join(_bad5)
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("ансамбли (дуэт, трио, квартет)", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

@@ -213,8 +213,17 @@ if LLM_READY:
                           help="Модель пишет план по смыслу фраз, программа проверяет его.")
 REVIEW_MODE = "Проверить партитуру (готовый оркестр)"
 PIANO_REVIEW_MODE = "Проверить переложение (готовое фортепиано)"
-mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", "Переложение для фортепиано (из оркестра)", REVIEW_MODE,
+ENSEMBLE_MODE = "Ансамбль: дуэт, трио, квартет (из фортепиано)"
+mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", ENSEMBLE_MODE, "Переложение для фортепиано (из оркестра)", REVIEW_MODE,
                                 PIANO_REVIEW_MODE], key="mode_pick")
+ens_pick = None
+if mode == ENSEMBLE_MODE:
+    import ensemble
+    _grp = st.radio("Сколько исполнителей", ["Дуэт", "Трио", "Квартет"], horizontal=True, key="ens_group")
+    _opts = {e["ru"]: k for k, e in ensemble.ENSEMBLES.items() if e["group"] == _grp}
+    ens_pick = _opts[st.selectbox("Состав", list(_opts), key="ens_pick_" + _grp)]
+    st.caption("Откуда состав: %s. Каждую партию играет один исполнитель; в составах без фортепиано каждая нота пьесы "
+               "отдаётся одному инструменту (так делают мастера: замер по базе IRCAM)." % ensemble.ENSEMBLES[ens_pick]["source"])
 SOLO_OPTIONS = {"Фортепиано": "Piano", "Флейта (нежная, невысокая)": "Flute", "Кларнет": "Clarinet", "Гобой": "Oboe",
                 "Скрипка": "Violin I", "Виолончель": "Cello", "Аккордеон": "Accordion", "Орган": "Organ", "Гитара": "Guitar"}
 LEAD_MODES = ["Оркестр сам распределяет мелодию", "Один солист на всю пьесу", "Меняющиеся солисты, как в «Болеро»"]
@@ -241,7 +250,7 @@ if mode == PIANO_REVIEW_MODE:
                "сколько гармонии оркестра сохранилось в переложении.")
     orig_up = checked_midi(any_file("Оркестровый оригинал (необязательно, MIDI или MusicXML)", "orig_up"), "Оригинал")
 go = st.button({"Оркестровка (из фортепиано)": "Создать оркестровку", REVIEW_MODE: "Проверить партитуру",
-                PIANO_REVIEW_MODE: "Проверить переложение"}.get(mode, "Создать переложение"),
+                PIANO_REVIEW_MODE: "Проверить переложение", ENSEMBLE_MODE: "Создать ансамбль"}.get(mode, "Создать переложение"),
                disabled=up is None, use_container_width=True)
 
 
@@ -527,6 +536,41 @@ elif go and up is not None and mode == "Переложение для форте
                 st.error("Не удалось сделать редукцию. Проверьте, что это MIDI-файл оркестровки.")
                 with st.expander("Подробности для разработчика"):
                     st.code(traceback.format_exc())
+elif go and up is not None and mode == ENSEMBLE_MODE:
+    if up.size > 2 * 1024 * 1024:
+        st.error("Файл больше 2 МБ.")
+    else:
+        _prog = progress.Steps([("reduce", "раздача нот по инструментам"), ("mp3", "запись MP3")], progress.midi_seconds(up.getvalue()))
+        with st.spinner("Делаю ансамбль..."):
+            try:
+                import ensemble
+                _prog.go("reduce")
+                _work = tempfile.mkdtemp(prefix="ensemble_")
+                _src = os.path.join(_work, "piano.mid")
+                with open(_src, "wb") as _f:
+                    _f.write(up.getvalue())
+                _stem = os.path.join(_work, "ensemble")
+                _rep = ensemble.arrange(_src, _stem, ens_pick)
+                try:
+                    _gate = quality_gate.check(_src, _stem + ".mid", melody=None)
+                    _rep["foreign"] = (_gate.get("stats") or {}).get("foreign")
+                except Exception:
+                    _rep["foreign_error"] = traceback.format_exc()
+                _prog.go("mp3")
+                try:
+                    _mp3 = audio_tools.render_mp3(_stem + ".mid", _stem + ".mp3")
+                except Exception:
+                    _mp3 = None
+                _prog.finish()
+                st.session_state.result = {"mode": "ensemble", "report": _rep, "midi": _stem + ".mid",
+                                           "mp3": _mp3 if _mp3 and os.path.exists(_mp3) else None,
+                                           "name": os.path.splitext(up.name)[0]}
+            except Exception:
+                _prog.abort()
+                st.session_state.result = None
+                st.error("Не удалось сделать ансамбль. Проверьте, что это фортепианная пьеса в MIDI или MusicXML.")
+                with st.expander("Подробности для разработчика"):
+                    st.code(traceback.format_exc())
 elif go and up is not None and mode == PIANO_REVIEW_MODE:
     if up.size > 2 * 1024 * 1024 or (orig_up is not None and orig_up.size > 2 * 1024 * 1024):
         st.error("Файл больше 2 МБ.")
@@ -699,6 +743,27 @@ if res and res.get("mode") == "piano_review":
     st.download_button("Скачать отчёт и карту (HTML, открывается в браузере)",
                        score_review.map_html(_rv, standalone=True).encode("utf-8"),
                        file_name=res["name"] + "_проверка_переложения.html", mime="text/html", use_container_width=True)
+    res = None
+if res and res.get("mode") == "ensemble":
+    import ensemble
+    st.markdown(theme.SECTION("III", "Ансамбль"), unsafe_allow_html=True)
+    _er = res["report"]
+    st.info(ensemble.text(_er))
+    _fg = _er.get("foreign")
+    if _fg:
+        st.caption("Проверка на фальшь: %d из %d нот ансамбля не совпадают с тем, что в эту долю играет фортепиано."
+                   % (_fg.get("bad", 0), _fg.get("total", 0)))
+    elif _er.get("foreign_error"):
+        st.warning("Проверку на фальшь выполнить не удалось.")
+        with st.expander("Подробности для разработчика"):
+            st.code(_er["foreign_error"])
+    if res["mp3"]:
+        st.audio(res["mp3"], format="audio/mpeg")
+    else:
+        st.info("Звуковая запись сейчас недоступна на сервере. Скачайте MIDI и откройте его в MuseScore или в партитурном проигрывателе.")
+    st.download_button("Скачать ансамбль (MIDI)", open(res["midi"], "rb").read(),
+                       file_name="%s_%s.mid" % (res["name"], _er["ensemble"]), mime="audio/midi", use_container_width=True)
+    st.caption("Ноты по строкам и звук в браузере: откройте скачанный MIDI в партитурном проигрывателе (ссылка вверху страницы).")
     res = None
 if res and res.get("mode") == "reduction":
     st.markdown(theme.SECTION("III", "Результат переложения"), unsafe_allow_html=True)
