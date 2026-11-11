@@ -482,5 +482,22 @@ except Exception as _e:
 print("%-30s %s  %s" % ("громкость: тихая секунда", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+try:
+    import smooth as _sm
+    _ln = {"Violin I": [[0.0, 1.0, 60, "melody"], [1.5, 1.0, 62, "melody"], [4.0, 1.0, 64, "melody"]]}
+    _st = _sm.legato(_ln)
+    _n = _ln["Violin I"]
+    _rb = _sm.ramp_base({0: "mp", 1: "mf"}, [0.0, 4.0, 8.0], {"mp": 64, "mf": 80, "f": 96})
+    _ok = (abs(_n[0][1] - 1.5) < 1e-9          # разрыв 0,5 дол. закрыт
+           and abs(_n[1][1] - 1.0) < 1e-9      # разрыв 1,5 дол. больше предела: не тронут
+           and [x[0] for x in _n] == [0.0, 1.5, 4.0]     # начала нот прежние
+           and _st["extended_notes"] == 1
+           and _rb(0.0, 0) == 64 and _rb(2.0, 0) == 72 and _rb(4.0, 1) == 80)   # плавный переход mp → mf в такте
+    _msg = "продлено нот %d; плавный переход 64→72→80" % _st["extended_notes"]
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("плавность (legato, ramp)", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

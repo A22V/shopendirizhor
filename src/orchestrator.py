@@ -568,6 +568,8 @@ def semitones(shift):
 
 def build_score(s, lines, dyn, piano_mode="off", meta=None, acc_extra=0):
     starts = [b[0] for b in meta["bars"]]
+    import smooth
+    _ramp = smooth.ramp_base(dyn, starts, LEVEL_VEL) if smooth.ramp_enabled() else None
     out = stream.Score()
     piano_parts = [copy.deepcopy(p) for p in s.parts]
     tempo_done = False
@@ -590,7 +592,9 @@ def build_score(s, lines, dyn, piano_mode="off", meta=None, acc_extra=0):
             tempo_done = True
         for off, dur, midi, role in lines[name]:
             n = note.Note(midi, quarterLength=dur)
-            v = max(20, min(120, LEVEL_VEL[dyn.get(bar_of(starts, off), "mf")] + ROLE_VEL.get(role, 0)
+            _bi = bar_of(starts, off)
+            _base = round(_ramp(off, _bi)) if _ramp else LEVEL_VEL[dyn.get(_bi, "mf")]
+            v = max(20, min(120, _base + ROLE_VEL.get(role, 0)
                              + (acc_extra if role != "melody" else 0)))
             n.volume = volume.Volume(velocity=v); n.volume.velocityIsRelative = False
             p.insert(off, n)
@@ -752,11 +756,15 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
         solo_changes = list(solo_changes) + _sa
     json.dump(plan, open(out_stem + "_plan.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     lines, log = realize(s, events, melody, meta, plan)
+    import smooth
+    if smooth.legato_enabled():   # ORCH_LEGATO=1: join notes of one part separated by a small gap (src/smooth.py)
+        log["legato"] = smooth.legato(lines)
     if thin_changes: log["thin_changes"] = thin_changes
     if meta.get("texture"): log["texture"] = meta["texture"]
     if solo: log["solo"] = {"instrument": solo, "changes": solo_changes}
     dyn = {bi: ph["level"] for ph in plan["phrases"] for bi in range(ph["bars"][0] - 1, ph["bars"][1])}
     log["dynamics_by_bar"] = {b + 1: d for b, d in sorted(dyn.items())}
+    if smooth.ramp_enabled(): log["ramp"] = "on"   # ORCH_RAMP=1: smooth loudness steps between phrases (src/smooth.py)
     snd = build_score(s, lines, dyn, piano_mode, meta, acc_extra=SOLO_ACC_VEL_BY.get(solo, SOLO_ACC_VEL) if solo else 0)
     snd.write("midi", fp=out_stem + ".mid")
     mix_midi(out_stem + ".mid")
