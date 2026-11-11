@@ -139,6 +139,24 @@ def melody_ids(notes, tpb):
     return ids
 
 
+MONO_STRUM = 0.15    # мелодия одноголосна: две ноты «мелодии» ближе 0,15 доли — это перебор аккорда (рояльный свиток, арпеджио)
+
+
+def mono_melody(notes, mel, tpb):
+    """Мелодия для смычка и дыхания одноголосна (mono=True, по выбору, эвристика): если две ноты «мелодии» начались
+    ближе MONO_STRUM доли (аккорд, сыгранный чуть вразнобой, как на рояльных свитках), мелодией остаётся верхняя,
+    нижняя уходит в сопровождение (она всё равно звучит, у рояля или у другого инструмента). Возвращает новое множество."""
+    ms = sorted((n for n in notes if n["id"] in mel), key=lambda n: (n["s"], -n["p"]))
+    keep, win = set(), MONO_STRUM * tpb
+    i = 0
+    while i < len(ms):
+        j = i
+        while j + 1 < len(ms) and ms[j + 1]["s"] - ms[j]["s"] < win: j += 1
+        keep.add(max(ms[i:j + 1], key=lambda n: n["p"])["id"])
+        i = j + 1
+    return keep
+
+
 def melody_shift(notes, mel, key):
     """Одна октава на всю пьесу для мелодии верхнего голоса: чтобы больше нот легло в удобную середину."""
     ps = [n["p"] for n in notes if n["id"] in mel]
@@ -278,7 +296,7 @@ def distribute(notes, voices, mel, tpb, shift0=0, lead_at=None):
     return {v: st[i]["notes"] for i, v in enumerate(voices)}, stat
 
 
-def with_piano(notes, voices, mel, tpb, lead_at=None):
+def with_piano(notes, voices, mel, tpb, lead_at=None, mono=False):
     """Составы с роялем: верхний инструмент — мелодия; рояль — всё остальное; виолончель и альт удваивают бас и середину.
     lead_at(тик) -> название ведущего по плану ("Piano" — мелодию играет сам рояль). Кто не ведёт, тот сопровождает:
     виолончель — бас, альт — средний голос, скрипка — средний голос, если альта нет (эвристика); духовой молчит."""
@@ -339,7 +357,7 @@ def with_piano(notes, voices, mel, tpb, lead_at=None):
             last, last_on = n["p"], on
         out[name] += seq
         stat["inner_notes"] += len(seq)
-    if lead_at:                                  # на стыках ведущих: у партии не больше одной ноты сразу
+    if lead_at or mono:                          # у партии не больше одной ноты сразу (стыки ведущих, одноголосная мелодия)
         for v in voices:
             seq = sorted(out[v], key=lambda n: (n["s"], -n["p"]))
             for a, b in zip(seq, seq[1:]):
@@ -612,14 +630,17 @@ def _track(name, ch, program, pan, seq, extra=()):
     return tr
 
 
-def arrange(in_path, out_stem, ensemble, plan=None, legato=False):
+def arrange(in_path, out_stem, ensemble, plan=None, legato=False, mono=False):
     """Пишет <out_stem>.mid и возвращает отчёт (словарь). ensemble — ключ из ENSEMBLES.
     plan — проверенный план модели (кто ведёт мелодию по фразам, где legato) или None: тогда как в версии 1.
-    legato=True — связная игра во всей пьесе (без плана) или там, где так решил план."""
+    legato=True — связная игра во всей пьесе (без плана) или там, где так решил план.
+    mono=True — мелодия одноголосна: перебор аккорда не считается мелодией, ноты мелодии не налезают друг на друга."""
     ens = ENSEMBLES[ensemble]
     notes, meta, pedal, tpb = read(in_path)
     if not notes: raise ValueError("в файле нет нот")
     mel = melody_ids(notes, tpb)
+    if mono:
+        n_mel = len(mel); mel = mono_melody(notes, mel, tpb)
     voices = ens["voices"]
     lead_name = legato_at = hand = None
     if plan:
@@ -628,13 +649,14 @@ def arrange(in_path, out_stem, ensemble, plan=None, legato=False):
     elif legato:
         legato_at = lambda t: True
     if ens["piano"]:
-        parts, piano, stat = with_piano(notes, voices, mel, tpb, lead_name)
+        parts, piano, stat = with_piano(notes, voices, mel, tpb, lead_name, mono)
     else:
         sh = melody_shift(notes, mel, INSTR[voices[0]][2])
         parts, stat = distribute(notes, voices, mel, tpb, sh, (lambda t: voices.index(lead_name(t))) if lead_name else None)
         stat["melody_shift"] = sh
         piano = None
     piano_mel = stat.pop("_piano_mel", set())
+    if mono: stat["mono_melody_dropped"] = n_mel - len(mel)
     stat["pedal_sustained"] = sum(_sustain(parts[v], pedal, tpb) for v in voices)
     stat["legato_extended"] = sum(_legato(parts[v], tpb) for v in voices)
     if legato_at:
@@ -698,6 +720,9 @@ def text(rep):
                  % (s.get("bass_notes", 0), s.get("inner_notes", 0), s["octave"]))
     if s.get("pedal_sustained"):
         L.append("Нот, которые у рояля держала педаль, продлено: %d (у смычка и дыхания педали нет)." % s["pedal_sustained"])
+    if s.get("mono_melody_dropped"):
+        L.append("Одноголосная мелодия: %d нот, начатых вразнобой с верхней (перебор аккорда), переданы в сопровождение."
+                 % s["mono_melody_dropped"])
     if s.get("sing_extended"):
         L.append("Связная игра (legato): продлено до следующей ноты той же партии %d нот; %d остановлено раньше, чтобы не "
                  "вышло резкого созвучия, которого нет у рояля." % (s["sing_extended"], s.get("sing_stopped", 0)))
@@ -722,4 +747,4 @@ if __name__ == "__main__":
     else:                                        # ... пьеса.mid выход состав [--legato] [--plan план.json]
         import json
         _plan = json.load(open(sys.argv[sys.argv.index("--plan") + 1], encoding="utf-8")) if "--plan" in sys.argv else None
-        print(text(arrange(sys.argv[1], sys.argv[2], sys.argv[3], plan=_plan, legato="--legato" in sys.argv)))
+        print(text(arrange(sys.argv[1], sys.argv[2], sys.argv[3], plan=_plan, legato="--legato" in sys.argv, mono="--mono" in sys.argv)))

@@ -542,14 +542,36 @@ try:
     _none, _elog = _E.plan_with_model(_src, "quartet_string", "deepseek", "m", "k", call=_boom)
     _t = _E.arrange(_src, os.path.join(_tmp, "t"), "trio_piano", plan={"phrases": [
         {"bars": [1, _half], "lead": "Piano", "articulation": "legato"}, {"bars": [_half + 1, len(_bars)], "lead": "Violin"}]})
+    import mido as _mo
+    _p = os.path.join(_tmp, "p.mid")                                  # аккорд, взятый вразнобой: 0,05 доли между нотами
+    _m = _mo.MidiFile(ticks_per_beat=480); _tr = _mo.MidiTrack(); _m.tracks.append(_tr); _tr.append(_mo.Message("program_change", program=0, time=0))
+    _tt = 0
+    for _k in range(8):
+        for _i, _nt in enumerate((48, 55, 64, 72)):
+            _tr.append(_mo.Message("note_on", note=_nt + (_k % 2), velocity=70, time=24 if _i else (0 if _k == 0 and _i == 0 else 360)))
+        _tr.append(_mo.Message("note_off", note=48, velocity=0, time=300))
+        for _nt in (55, 64, 72): _tr.append(_mo.Message("note_off", note=_nt, velocity=0, time=0))
+    _m.save(_p)
+    def _overlap(stem):
+        _o = _mo.MidiFile(stem + ".mid"); _tk = _o.ticks_per_beat; _best = 0
+        for _t0 in _o.tracks:
+            if _t0.name != "Violin": continue
+            _on = set()
+            for _x in _t0:
+                if _x.type == "note_on" and _x.velocity > 0: _on.add(_x.note)
+                elif _x.type in ("note_on", "note_off"): _on.discard(_x.note)
+                _best = max(_best, len(_on))
+        return _best
+    _E.arrange(_p, os.path.join(_tmp, "m0"), "duo_violin_piano"); _E.arrange(_p, os.path.join(_tmp, "m1"), "duo_violin_piano", mono=True)
+    _mono_ok = _overlap(os.path.join(_tmp, "m0")) > 1 and _overlap(os.path.join(_tmp, "m1")) == 1
     _fg = [quality_gate.check(_src, os.path.join(_tmp, x + ".mid"), melody=None)["stats"]["foreign"]["bad"] for x in "bct"]
     _ok = (_plan is not None and _plog["used"] and len(_plog["rounds"]) == 2 and _plog["rounds"][0]["problems"]
            and _none is None and "HTTP 402" in _elog["error"]
            and _b["stat"].get("sing_extended", 0) > 0 and _b["played_share"] == _a["played_share"]
            and "Violin II" in _c["plan"]["lead_share"] and _c["played_share"] >= 0.95
            and _t["plan"]["lead_share"].get("Piano", 0) > 0 and _fg == [0, 0, 0]
-           and "План модели" in _E.text(_c))
-    _msg = "связано %d нот; план принят со 2-й попытки; ведут %s; чужих нот %s" % (_b["stat"].get("sing_extended", 0), _c["plan"]["lead_share"], _fg)
+           and "План модели" in _E.text(_c) and _mono_ok)
+    _msg = "связано %d нот; план принят со 2-й попытки; ведут %s; чужих нот %s; одноголосная мелодия: до %d нот сразу -> 1" % (_b["stat"].get("sing_extended", 0), _c["plan"]["lead_share"], _fg, _overlap(os.path.join(_tmp, "m0")))
 except Exception as e:
     _ok, _msg = False, "исключение: %r" % e
 print("%-30s %s  %s" % ("ансамбли: legato и план модели", "OK " if _ok else "FAIL", _msg))

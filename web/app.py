@@ -229,6 +229,10 @@ if mode == ENSEMBLE_MODE:
                              help="У рояля звук продлевает педаль, у смычка педали нет: без связывания между нотами "
                                   "остаются паузы и звучит отрывисто. Высоты и начала нот не меняются. Для танцевальных, "
                                   "отрывистых пьес лучше не включать.")
+    ens_mono = st.checkbox("Одноголосная мелодия: перебор аккорда не считать мелодией", value=False, key="ens_mono",
+                           help="У рояльных свитков и живых записей аккорд берётся чуть вразнобой, и программа принимала "
+                                "нижние звуки такого аккорда за мелодию: скрипка играла по 3–5 нот сразу. С галочкой у "
+                                "мелодии остаётся одна нота за раз (верхняя), остальные уходят в сопровождение.")
     ens_llm = False
     if LLM_READY:
         ens_llm = st.checkbox("План от модели (%s): кто ведёт мелодию в каждой фразе и где играть связно" % PROVIDER,
@@ -567,7 +571,7 @@ elif go and up is not None and mode == ENSEMBLE_MODE:
                 _plan, _plog = None, None
                 if ens_llm and LLM_READY:
                     _plan, _plog = ensemble.plan_with_model(_src, ens_pick, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY)
-                _rep = ensemble.arrange(_src, _stem, ens_pick, plan=_plan, legato=ens_legato)
+                _rep = ensemble.arrange(_src, _stem, ens_pick, plan=_plan, legato=ens_legato, mono=ens_mono)
                 if _plog: _rep["planner"] = _plog
                 try:
                     _gate = quality_gate.check(_src, _stem + ".mid", melody=None)
