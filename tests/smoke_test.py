@@ -518,5 +518,42 @@ except Exception as _e:
 print("%-30s %s  %s" % ("ансамбли (дуэт, трио, квартет)", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- ансамбли: связная игра и план модели (кто ведёт мелодию) ---
+try:
+    import json as _json, tempfile, quality_gate
+    import ensemble as _E
+    _src = os.path.join(ROOT, "input", "k545_piano_excerpt.mid")
+    _tmp = tempfile.mkdtemp()
+    _a = _E.arrange(_src, os.path.join(_tmp, "a"), "quartet_string")
+    _b = _E.arrange(_src, os.path.join(_tmp, "b"), "quartet_string", legato=True)
+    _notes, _meta, _ped, _tpb = _E.read(_src); _mel = _E.melody_ids(_notes, _tpb)
+    _bars = _E.bar_table(_meta, max(n["e"] for n in _notes), _tpb)
+    _half = max(2, len(_bars) // 2)
+    _good = {"phrases": [{"bars": [1, _half], "lead": "Violin", "articulation": "legato", "why": "тема"},
+                         {"bars": [_half + 1, len(_bars)], "lead": "Violin II", "articulation": "as_written", "why": "ответ"}]}
+    _n = [0]
+    def _fake(provider, model, key, system, user):
+        _n[0] += 1
+        if _n[0] == 1: return '{"phrases":[{"bars":[1,%d],"lead":"Tuba"}]}' % len(_bars)
+        return "```json\n" + _json.dumps(_good) + "\n```"
+    _plan, _plog = _E.plan_with_model(_src, "quartet_string", "deepseek", "m", "k", call=_fake)
+    _c = _E.arrange(_src, os.path.join(_tmp, "c"), "quartet_string", plan=_plan)
+    def _boom(*a): raise RuntimeError("HTTP 402")
+    _none, _elog = _E.plan_with_model(_src, "quartet_string", "deepseek", "m", "k", call=_boom)
+    _t = _E.arrange(_src, os.path.join(_tmp, "t"), "trio_piano", plan={"phrases": [
+        {"bars": [1, _half], "lead": "Piano", "articulation": "legato"}, {"bars": [_half + 1, len(_bars)], "lead": "Violin"}]})
+    _fg = [quality_gate.check(_src, os.path.join(_tmp, x + ".mid"), melody=None)["stats"]["foreign"]["bad"] for x in "bct"]
+    _ok = (_plan is not None and _plog["used"] and len(_plog["rounds"]) == 2 and _plog["rounds"][0]["problems"]
+           and _none is None and "HTTP 402" in _elog["error"]
+           and _b["stat"].get("sing_extended", 0) > 0 and _b["played_share"] == _a["played_share"]
+           and "Violin II" in _c["plan"]["lead_share"] and _c["played_share"] >= 0.95
+           and _t["plan"]["lead_share"].get("Piano", 0) > 0 and _fg == [0, 0, 0]
+           and "План модели" in _E.text(_c))
+    _msg = "связано %d нот; план принят со 2-й попытки; ведут %s; чужих нот %s" % (_b["stat"].get("sing_extended", 0), _c["plan"]["lead_share"], _fg)
+except Exception as e:
+    _ok, _msg = False, "исключение: %r" % e
+print("%-30s %s  %s" % ("ансамбли: legato и план модели", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

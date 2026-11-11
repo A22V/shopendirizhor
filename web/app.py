@@ -224,6 +224,20 @@ if mode == ENSEMBLE_MODE:
     ens_pick = _opts[st.selectbox("Состав", list(_opts), key="ens_pick_" + _grp)]
     st.caption("Откуда состав: %s. Каждую партию играет один исполнитель; в составах без фортепиано каждая нота пьесы "
                "отдаётся одному инструменту (так делают мастера: замер по базе IRCAM)." % ensemble.ENSEMBLES[ens_pick]["source"])
+    ens_legato = st.checkbox("Связная игра (legato): каждый инструмент тянет ноту до своей следующей ноты", value=False,
+                             key="ens_legato",
+                             help="У рояля звук продлевает педаль, у смычка педали нет: без связывания между нотами "
+                                  "остаются паузы и звучит отрывисто. Высоты и начала нот не меняются. Для танцевальных, "
+                                  "отрывистых пьес лучше не включать.")
+    ens_llm = False
+    if LLM_READY:
+        ens_llm = st.checkbox("План от модели (%s): кто ведёт мелодию в каждой фразе и где играть связно" % PROVIDER,
+                              value=False, key="ens_llm",
+                              help="Платный запрос (обычно один). Модель получает указания, как поступают мастера, и "
+                                   "пишет план; ноты раздаёт программа и проверяет план. Если план не годится или "
+                                   "сервис не ответил, ансамбль делается без плана, причина будет показана.")
+    else:
+        st.caption("План от модели (DeepSeek) недоступен: в настройках сервера нет ключа.")
 SOLO_OPTIONS = {"Фортепиано": "Piano", "Флейта (нежная, невысокая)": "Flute", "Кларнет": "Clarinet", "Гобой": "Oboe",
                 "Скрипка": "Violin I", "Виолончель": "Cello", "Аккордеон": "Accordion", "Орган": "Organ", "Гитара": "Guitar"}
 LEAD_MODES = ["Оркестр сам распределяет мелодию", "Один солист на всю пьесу", "Меняющиеся солисты, как в «Болеро»"]
@@ -550,7 +564,11 @@ elif go and up is not None and mode == ENSEMBLE_MODE:
                 with open(_src, "wb") as _f:
                     _f.write(up.getvalue())
                 _stem = os.path.join(_work, "ensemble")
-                _rep = ensemble.arrange(_src, _stem, ens_pick)
+                _plan, _plog = None, None
+                if ens_llm and LLM_READY:
+                    _plan, _plog = ensemble.plan_with_model(_src, ens_pick, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY)
+                _rep = ensemble.arrange(_src, _stem, ens_pick, plan=_plan, legato=ens_legato)
+                if _plog: _rep["planner"] = _plog
                 try:
                     _gate = quality_gate.check(_src, _stem + ".mid", melody=None)
                     _rep["foreign"] = (_gate.get("stats") or {}).get("foreign")
@@ -749,6 +767,14 @@ if res and res.get("mode") == "ensemble":
     st.markdown(theme.SECTION("III", "Ансамбль"), unsafe_allow_html=True)
     _er = res["report"]
     st.info(ensemble.text(_er))
+    _pl = _er.get("planner")
+    if _pl and _pl.get("used"):
+        st.caption("План написала модель: заказано %s, сервис ответил %s; запросов: %d."
+                   % (_pl.get("model_requested") or "по умолчанию", ", ".join(_pl.get("model_served_by_api") or ["?"]), len(_pl["rounds"])))
+    elif _pl:
+        st.warning("План модели не использован: %s. Ансамбль сделан без плана (мелодию ведёт верхний инструмент)." % _pl.get("error"))
+        with st.expander("Что ответила модель (для разработчика)"):
+            st.json(_pl)
     _fg = _er.get("foreign")
     if _fg:
         st.caption("Проверка на фальшь: %d из %d нот ансамбля не совпадают с тем, что в эту долю играет фортепиано."
