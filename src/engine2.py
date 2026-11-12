@@ -260,6 +260,15 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
         # --- бас: виолончель играет как написано, контрабас держит до следующего баса (но не дольше педали)
         bass_lit = next((n for n in ("Cello", "Bassoon", "Double Bass") if n in free), None)
         bass_hold = "Double Bass" if "Double Bass" in free and bass_lit != "Double Bass" else None
+        lh_long = []
+        if pad_enabled() and mode == "figure" and "Cello" in free and "Double Bass" in free:
+            # ORCH_PAD (уточнение 2026-11-12, «Лунная»): долгие ноты левой руки над басом (октава и аккорд) — не фон.
+            # Как в одобренном образце: контрабас держит бас, виолончель — верхнюю из этих нот, фагот — среднюю.
+            bstarts = [acc[i][0] for i in idx if is_bass[i]]
+            lh_long = [i for i in rest if acc[i][1] - acc[i][0] >= SHORT
+                       and any(abs(acc[i][0] - b) < 0.05 for b in bstarts)]
+            if lh_long:
+                bass_lit, bass_hold = None, "Double Bass"
         for i in idx:
             if not is_bass[i]:
                 continue
@@ -275,6 +284,23 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                 ok = rescue(s, e - s, p, free)
             st["placed" if ok else "dropped"] += 1
         used = {bass_lit, bass_hold}
+        if lh_long:
+            by_on = {}
+            for i in lh_long:
+                by_on.setdefault(round(acc[i][0], 2), []).append(i)
+            has_mel = bool(ph.get("melody"))
+            for g in by_on.values():
+                g.sort(key=lambda k: -acc[k][2])
+                for k, i in enumerate(g):
+                    s, e, p = acc[i]
+                    who = "Cello" if k == 0 else ("Bassoon" if has_mel and "Bassoon" in free else None)
+                    ok = bool(who) and place(who, s, e - s, p, "bass")
+                    if not ok:
+                        ok = rescue(s, e - s, p, free)
+                    st["placed" if ok else "dropped"] += 1
+            used.update({"Cello", "Bassoon"})
+            st.setdefault("lh_long", {})["%d-%d" % (a_, b_)] = len(lh_long)
+            rest = [i for i in rest if i not in set(lh_long)]
         if mode == "figure":
             strings = [n for n in STRINGS_HIGH_TO_LOW if n in free]
             winds = [n for n in ("Clarinet", "Bassoon", "Flute", "Oboe") if n in free and n != bass_lit]
@@ -322,10 +348,13 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
             if pad_enabled():
                 # ORCH_PAD=1 (2026-11-12): свободные скрипки и валторна тянут верхнюю, среднюю и нижнюю ноту каждой доли
                 # бегущего сопровождения (образец «Лунной», одобрен на слух); фагот по-прежнему держит бас.
+                has_mel = bool(ph.get("melody"))
                 st.setdefault("pad", {})["%d-%d" % (a_, b_)] = _pad(
-                    [acc[i] for i in rest], t0, [n for n in ("Violin I", "Violin II", "Horn") if n in free and n not in used],
+                    [acc[i] for i in rest if acc[i][1] - acc[i][0] < SHORT], t0,
+                    [n for n in ("Violin I", "Violin II", "Horn") if n in free and n not in used and (has_mel or n != "Horn")],
                     rng, place, melody_at)
-                holders = [h for h in holders if h == "Bassoon"]
+                # валторна и фагот вступают вместе с мелодией (образец «Лунной»: вступление только струнные)
+                holders = [h for h in holders if h == "Bassoon" and has_mel]
             if spans:
                 regions = [(max(s, t0), min(e, t1)) for s, e in spans if e > t0 and s < t1]
             else:
