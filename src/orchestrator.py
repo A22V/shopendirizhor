@@ -740,6 +740,8 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
     if solo:   # solo instrument chosen by the user (see texture_fix.apply_solo); None = plan unchanged
         plan, solo_changes, _pm = texture_fix.apply_solo(plan, solo, melody, meta["bars"])
         if _pm != "off": piano_mode = _pm
+    if texture_fix.one_lead_enabled() and not solo:   # ORCH_ONE_LEAD=1: one melody carrier for the whole piece (texture_fix.one_lead)
+        plan, _one_lead = texture_fix.one_lead(plan, melody)
     if texture_fix.enabled():   # ORCH_THIN=1: thin out "walls of sound" (see texture_fix.py); off by default
         plan, thin_changes = texture_fix.thin_plan(plan)
     if texture_fix.bass_enabled():   # ORCH_BASS=1: add a double bass the planner forgot (see texture_fix.py)
@@ -760,6 +762,7 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
     if smooth.legato_enabled():   # ORCH_LEGATO=1: join notes of one part separated by a small gap (src/smooth.py)
         log["legato"] = smooth.legato(lines)
     if thin_changes: log["thin_changes"] = thin_changes
+    if texture_fix.one_lead_enabled() and not solo: log["one_lead"] = _one_lead
     if meta.get("texture"): log["texture"] = meta["texture"]
     if solo: log["solo"] = {"instrument": solo, "changes": solo_changes}
     dyn = {bi: ph["level"] for ph in plan["phrases"] for bi in range(ph["bars"][0] - 1, ph["bars"][1])}

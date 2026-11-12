@@ -196,6 +196,9 @@ def phrase_levels(phrases):
     return [LEVELS[x] for x in out]
 
 
+ABS_MP, ABS_MF = 58, 84     # сила нажатия: ниже 58 — mp, ниже 84 — mf, иначе f (эвристика)
+
+
 def velocity_levels(phrases, bar_velocity):
     """Уровень фразы по средней силе нажатия пианиста в её тактах; соседние фразы отличаются не больше чем на шаг."""
     means = []
@@ -205,6 +208,12 @@ def velocity_levels(phrases, bar_velocity):
         means.append(sum(vs) / len(vs) if vs else None)
     valid = [m for m in means if m is not None]
     if not valid: return phrase_levels(phrases)
+    if os.environ.get("ORCH_DYN_PIANO", "").strip().lower() == "abs":
+        # 2026-11-12: ступень по самой силе нажатия, а не относительно пьесы (ровная тихая «Лунная» получала mf/f и
+        # «кульминацию»). Пороги 58 и 84 — эвристика.
+        mid = sum(valid) / len(valid)
+        return [LEVELS[0 if (m if m is not None else mid) < ABS_MP else 1 if (m if m is not None else mid) < ABS_MF else 2]
+                for m in means]
     lo, hi = min(valid), max(valid)
     raw = []
     for p, m in zip(phrases, means):

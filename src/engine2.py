@@ -117,6 +117,59 @@ def _split_streams(pitches):
     return best
 
 
+PAD_BAND = {"Violin I": (57, 84), "Violin II": (55, 79), "Horn": (48, 67)}   # эвристика: удобный регистр для тянущихся нот
+
+
+def pad_enabled():
+    return os.environ.get("ORCH_PAD", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _pad(run, t0, players, rng, place, melody_at):
+    """run = бегущие ноты фразы (начало, конец, высота). В каждой доле берутся разные высоты: верхняя — первой скрипке,
+    следующая — второй, нижняя — валторне (если она свободна и высот не меньше двух). Одинаковые подряд сливаются в одну
+    долгую ноту. Нота не выше мелодии. Новых звуков нет: это те же ноты рояля, только тянущиеся (как под педалью)."""
+    if not run or not players:
+        return {}
+    import math
+    beats = {}
+    for s, e, p in run:
+        beats.setdefault(int(math.floor(s - t0 + 1e-6)), set()).add(p)
+    strings = [n for n in players if n != "Horn"]
+    lines_ = {n: [] for n in players}
+    for b in sorted(beats):
+        ps = sorted(beats[b], reverse=True)
+        want = {}
+        for k, n in enumerate(strings):
+            if k < len(ps) and (len(ps) > 1 or k == 0):
+                want[n] = ps[k]
+        if "Horn" in players and len(ps) >= 2 and ps[-1] not in want.values():
+            want["Horn"] = ps[-1]
+        start = t0 + b
+        top = melody_at(start)
+        for n, p in want.items():
+            lo, hi = PAD_BAND[n]
+            lo, hi = max(lo, rng(n)[0]), min(hi, rng(n)[1])
+            while p > hi: p -= 12
+            while p < lo: p += 12
+            while top is not None and p >= top and p - 12 >= lo: p -= 12
+            if not (lo <= p <= hi) or (top is not None and p >= top):
+                continue
+            seq = lines_[n]
+            if seq and seq[-1][2] == p and abs(seq[-1][0] + seq[-1][1] - start) < 1e-6:
+                seq[-1][1] += 1.0
+            else:
+                seq.append([start, 1.0, p])
+    out = {}
+    for n, seq in lines_.items():
+        k = 0
+        for s, d, p in seq:
+            if place(n, s, d, p, "inner1" if n != "Horn" else "inner2"):
+                k += 1
+        if k:
+            out[n] = k
+    return out
+
+
 def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
     """Заполняет lines сопровождением: каждая нота рояля, не вошедшая в мелодию, отдаётся одному инструменту."""
     starts = [b[0] for b in bars]
@@ -266,6 +319,13 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                 st["placed" if done else "dropped"] += 1
             # --- «педаль»: духовые держат ноты аккорда, пока звучит педаль (нет педали в файле — такт)
             holders = [n for n in ("Horn", "Bassoon", "Violin II", "Clarinet", "Oboe") if n in free and n not in used][:MAX_HOLDERS]
+            if pad_enabled():
+                # ORCH_PAD=1 (2026-11-12): свободные скрипки и валторна тянут верхнюю, среднюю и нижнюю ноту каждой доли
+                # бегущего сопровождения (образец «Лунной», одобрен на слух); фагот по-прежнему держит бас.
+                st.setdefault("pad", {})["%d-%d" % (a_, b_)] = _pad(
+                    [acc[i] for i in rest], t0, [n for n in ("Violin I", "Violin II", "Horn") if n in free and n not in used],
+                    rng, place, melody_at)
+                holders = [h for h in holders if h == "Bassoon"]
             if spans:
                 regions = [(max(s, t0), min(e, t1)) for s, e in spans if e > t0 and s < t1]
             else:

@@ -392,3 +392,40 @@ def solo_accompaniment(plan, solo):
             changes.append("такты %d–%d: в сопровождении молчат %s" % (ph["bars"][0], ph["bars"][1],
                            ", ".join(sorted(set(removed)))))
     return plan, changes
+
+
+# ---------- один ведущий на всю пьесу (ORCH_ONE_LEAD=1, 2026-11-12, выкл. по умолчанию) ----------
+# Повод: пользователю не нравится «перекличка» (мелодия переходит от инструмента к инструменту) и постоянно солирующая
+# скрипка; понравился образец «Лунной», где всю мелодию ведёт кларнет. Выбор ведущего: первый из списка, в чей удобный
+# регистр ложится не меньше 90% нот мелодии; иначе тот, у кого доля больше. Списки и регистры — эвристика.
+LEAD_ORDER = ["Clarinet", "Flute", "Oboe", "Violin I", "Cello"]
+LEAD_BAND = {"Clarinet": (50, 86), "Flute": (62, 91), "Oboe": (60, 84), "Violin I": (55, 96), "Cello": (36, 69)}
+LEAD_FIT = 0.9
+LEAD_HIGH = 76      # середина мелодии от E5: первой пробуется флейта, ниже — кларнет (эвристика)
+
+
+def one_lead_enabled():
+    return os.environ.get("ORCH_ONE_LEAD", "") not in ("", "0", "false", "False")
+
+
+def one_lead(plan, melody):
+    """Вся мелодия одному инструменту; удвоения только духовыми и только в кульминации не тише mf."""
+    pit = [m["pitch"] for m in melody]
+    if not pit:
+        return plan, []
+    share = {n: sum(1 for p in pit if LEAD_BAND[n][0] <= p <= LEAD_BAND[n][1]) / len(pit) for n in LEAD_ORDER}
+    med = sorted(pit)[len(pit) // 2]
+    order = (["Flute", "Clarinet"] if med >= LEAD_HIGH else ["Clarinet", "Flute"]) + ["Oboe", "Violin I", "Cello"]
+    lead = next((n for n in order if share[n] >= LEAD_FIT), None) or max(order, key=lambda n: share[n])
+    plan = copy.deepcopy(plan)
+    plan.pop("melody_owner", None)
+    for ph in plan["phrases"]:
+        if not ph.get("melody"):
+            continue
+        ph["melody"] = [[lead, 0, 0.0]]
+        for role in ("bass", "inner1", "inner2", "figuration"):
+            if role in ph:
+                ph[role] = [x for x in ph[role] if x[0] != lead]
+        loud = ph.get("climax") and ph.get("level") in ("mf", "f")
+        ph["doublers"] = [x for x in ("Flute", "Oboe", "Clarinet") if x != lead][:2] if loud else []
+    return plan, ["one lead: %s (melody notes in its comfortable register: %d%%)" % (lead, round(100 * share[lead]))]
