@@ -780,6 +780,15 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
             log["loudness_follow"] = loudness_follow.apply(in_path, out_stem + ".mid")
     except Exception as e:
         log["loudness_follow"] = {"error": str(e)}
+    try:
+        import performer
+        if performer.enabled():   # ORCH_PERFORM=1: phrase shaping (velocity + CC11), notes unchanged (src/performer.py)
+            _bs = [b[0] for b in meta["bars"]]
+            log["performer"] = performer.apply(
+                out_stem + ".mid", _bs, [_bs[ph["bars"][0] - 1] for ph in plan["phrases"] if ph["bars"][0] - 1 < len(_bs)],
+                {k: {n[0] for n in v if n[3] == "melody"} for k, v in lines.items()})
+    except Exception as e:
+        log["performer"] = {"error": str(e)}
     if percussion:   # light percussion for rhythm (src/percussion.py); added AFTER loudness balance so drums stay soft
         import percussion as _perc
         _clx = {ph["bars"][0] - 1 for ph in plan["phrases"] if ph.get("climax")}

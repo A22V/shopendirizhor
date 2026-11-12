@@ -406,12 +406,16 @@ try:
     import orchestrator as _o3
     _src = _os3.path.join(_os3.path.dirname(__file__), "..", "input", "nocturneincsharpminor.mid")
     _d3 = _tf3.mkdtemp()
-    _o3.run(_src, _os3.path.join(_d3, "off"))
-    _os3.environ["ORCH_FOLLOW"] = "1"
+    _pf3 = _os3.environ.pop("ORCH_PERFORM", None)      # слой «исполнитель» тоже пишет CC11: в этой проверке он выключен
     try:
-        _l3, _, _ = _o3.run(_src, _os3.path.join(_d3, "on"))
+        _o3.run(_src, _os3.path.join(_d3, "off"))
+        _os3.environ["ORCH_FOLLOW"] = "1"
+        try:
+            _l3, _, _ = _o3.run(_src, _os3.path.join(_d3, "on"))
+        finally:
+            _os3.environ.pop("ORCH_FOLLOW", None)
     finally:
-        _os3.environ.pop("ORCH_FOLLOW", None)
+        if _pf3 is not None: _os3.environ["ORCH_PERFORM"] = _pf3
     def _cnt(path, ctl):
         n_ = 0
         for tr_ in _md3.MidiFile(path).tracks:
@@ -575,6 +579,43 @@ try:
 except Exception as e:
     _ok, _msg = False, "исключение: %r" % e
 print("%-30s %s  %s" % ("ансамбли: legato и план модели", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
+# --- слой «исполнитель» (ORCH_PERFORM): ноты те же, меняются сила нажатия и CC11 ---
+try:
+    import tempfile as _tf9, os as _os9, mido as _md9
+    import orchestrator as _o9
+    _src = _os9.path.join(ROOT, "input", "k545_piano_excerpt.mid")
+    _d9 = _tf9.mkdtemp()
+    _keep9 = {k: _os9.environ.pop(k, None) for k in ("ORCH_PERFORM", "ORCH_FOLLOW")}
+    try:
+        _o9.run(_src, _os9.path.join(_d9, "off"))
+        _os9.environ["ORCH_PERFORM"] = "1"
+        _l9, _, _ = _o9.run(_src, _os9.path.join(_d9, "on"))
+    finally:
+        _os9.environ.pop("ORCH_PERFORM", None)
+        for k, v in _keep9.items():
+            if v is not None: _os9.environ[k] = v
+    def _ev9(path):
+        nt, vel, cc = [], [], []
+        for i_, tr_ in enumerate(_md9.MidiFile(path).tracks):
+            t_ = 0
+            for x_ in tr_:
+                t_ += x_.time
+                if x_.type in ("note_on", "note_off"):
+                    nt.append((i_, t_, x_.type == "note_on" and x_.velocity > 0, x_.note))
+                    if x_.type == "note_on" and x_.velocity > 0: vel.append(x_.velocity)
+                elif x_.type == "control_change" and x_.control == 11: cc.append(x_.value)
+        return nt, vel, cc
+    _n0, _v0, _c0 = _ev9(_os9.path.join(_d9, "off.mid")); _n1, _v1, _c1 = _ev9(_os9.path.join(_d9, "on.mid"))
+    _pf = _l9.get("performer", {})
+    _ok = (_n0 == _n1 and _v0 != _v1 and not _c0 and len(_c1) > 0 and min(_c1) >= 20 and max(_c1) <= 127
+           and "error" not in _pf and _pf.get("phrases", 0) > 0)
+    _msg = "ноты и времена те же (%d событий); фраз %s; сила нажатия изменена у %s нот; точек CC11 %d (от %d до %d)" % (
+        len(_n0), _pf.get("phrases"), _pf.get("velocity_changed"), len(_c1), min(_c1) if _c1 else 0, max(_c1) if _c1 else 0)
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("слой «исполнитель»", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
