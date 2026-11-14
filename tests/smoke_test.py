@@ -524,6 +524,22 @@ except Exception as _e:
 print("%-30s %s  %s" % ("ансамбли (дуэт, трио, квартет)", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- контроль брака на ансамбле: мелодия ансамбля, а не оркестровая (ложный Б3, 2026-11-14) ---
+try:
+    import tempfile, quality_gate
+    import ensemble as _E3
+    _src = os.path.join(ROOT, "input", "k545_piano_excerpt.mid")
+    _tmp = tempfile.mkdtemp()
+    _E3.arrange(_src, os.path.join(_tmp, "d"), "duo_violin_piano")
+    _g = quality_gate.check(_src, os.path.join(_tmp, "d.mid"), melody=_E3.melody_beats(_src))
+    _hops = _g["stats"]["melody_hops"]
+    _ok = _hops == 0 and not any(d[0] == "Б3" for d in _g["defects"]) and _g["stats"]["foreign"]["bad"] == 0
+    _msg = "дуэт скрипка+рояль: пересадок мелодии %d, чужих нот %d" % (_hops, _g["stats"]["foreign"]["bad"])
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("контроль брака на ансамбле", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 # --- ансамбли: связная игра и план модели (кто ведёт мелодию) ---
 try:
     import json as _json, tempfile, quality_gate

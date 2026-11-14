@@ -658,7 +658,7 @@ elif go and up is not None and mode == ENSEMBLE_MODE:
                 _rep = ensemble.arrange(_src, _stem, ens_pick, plan=_plan, legato=ens_legato, mono=ens_mono)
                 if _plog: _rep["planner"] = _plog
                 try:
-                    _gate = quality_gate.check(_src, _stem + ".mid", melody=None)
+                    _gate = quality_gate.check(_src, _stem + ".mid", melody=ensemble.melody_beats(_src, mono=ens_mono))
                     _rep["foreign"] = (_gate.get("stats") or {}).get("foreign")
                 except Exception:
                     _rep["foreign_error"] = traceback.format_exc()

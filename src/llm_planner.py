@@ -45,7 +45,7 @@ def build_request(provider, model, api_key, system, user):
         url = ENDPOINTS[provider]
         headers = {"Content-Type": "application/json", "x-api-key": api_key,
                    "anthropic-version": "2023-06-01"}
-        body = {"model": model, "max_tokens": 4000, "system": system,
+        body = {"model": model, "max_tokens": 8000, "system": system,   # 8000: у длинной пьесы план бывает больше 4000 токенов
                 "messages": [{"role": "user", "content": user}]}
     elif provider == "gemini":
         url = ENDPOINTS[provider].format(model=model) + "?key=" + api_key

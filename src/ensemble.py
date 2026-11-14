@@ -139,6 +139,17 @@ def melody_ids(notes, tpb):
     return ids
 
 
+def melody_beats(in_path, mono=False):
+    """Мелодия, как её берёт ансамбль, для контроля брака: [(начало, конец, нота)] в долях. Не зависит от
+    переключателей оркестра (ORCH_ENGINE, ORCH_MELODY_HELD): без этого контроль на ансамблях брал мелодию
+    по-оркестровому и при выключенных переключателях находил ложное «мелодия скачет» (2026-11-14)."""
+    notes, meta, pedal, tpb = read(in_path)
+    mel = melody_ids(notes, tpb)
+    if mono:
+        mel = mono_melody(notes, mel, tpb)
+    return sorted((n["s"] / tpb, n["e"] / tpb, n["p"]) for n in notes if n["id"] in mel)
+
+
 MONO_STRUM = 0.15    # мелодия одноголосна: две ноты «мелодии» ближе 0,15 доли — это перебор аккорда (рояльный свиток, арпеджио)
 
 
