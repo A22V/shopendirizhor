@@ -741,5 +741,26 @@ except Exception as _e:
 print("%-30s %s  %s" % ("проверка по вкусу", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- шрифты verovio: если родная папка не найдена, берётся копия из репозитория ---
+try:
+    import verovio as _v14, score_player as _sp14
+    _orig = _v14.toolkit
+    class _Bad:
+        def __init__(self):
+            self._t = _orig(); self._t.setResourcePath("/nonexistent_verovio")
+        def __getattr__(self, k): return getattr(self._t, k)
+    _v14.toolkit = _Bad
+    try:
+        _tk = _sp14.make_toolkit()
+        _xml = open(_src13.replace(".mid", ".musicxml"), encoding="utf-8").read() if False else None
+        _ok = os.path.exists(os.path.join(_sp14.BUNDLED_VEROVIO, "Leipzig.xml")) and _tk.getResourcePath() == _sp14.BUNDLED_VEROVIO
+    finally:
+        _v14.toolkit = _orig
+    _msg = "запасная папка шрифтов подключена" if _ok else "НЕ подключена"
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("шрифты verovio", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

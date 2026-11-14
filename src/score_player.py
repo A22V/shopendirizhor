@@ -205,6 +205,25 @@ def is_musicxml(data, name=""):
 
 
 
+BUNDLED_VEROVIO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "verovio_data")
+_NEED = ("Leipzig.xml", "Bravura.xml", "Leipzig.css", "text")
+
+
+def make_toolkit():
+    """verovio.toolkit() с проверкой шрифтов. В облаке бывало: «font resources are not available» (папка шрифтов
+    библиотеки не найдена). Если в папке по умолчанию нет нужных файлов, берётся копия шрифтов из репозитория
+    (src/verovio_data, Leipzig и Bravura). Вид нот при исправной папке тот же (проверено: SVG побайтно равны)."""
+    import verovio
+    tk = verovio.toolkit()
+    try:
+        cur = tk.getResourcePath()
+    except Exception:
+        cur = ""
+    if not all(os.path.exists(os.path.join(cur, f)) for f in _NEED) and os.path.isdir(BUNDLED_VEROVIO):
+        tk.setResourcePath(BUNDLED_VEROVIO)
+    return tk
+
+
 def load_verovio(tk, text):
     """tk.loadData с перехватом сообщений verovio: библиотека пишет причину отказа в системный поток ошибок,
     а не в getLog(). Возвращает (ok, текст сообщений). Звук и ноты не меняет."""
@@ -341,8 +360,7 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
                 _pr[_m.channel] = _m.program
     for _p in parts:
         _p["program"] = next((_pr[c] for c in (_p.get("channels") or []) if c in _pr), None)
-    import verovio
-    tk = verovio.toolkit()
+    tk = make_toolkit()
     tk.setOptions({"pageWidth": page_width, "pageHeight": 60000, "scale": scale, "adjustPageHeight": True,
                    "header": "none", "footer": "none", "pageMarginLeft": 30, "pageMarginRight": 30,
                    "pageMarginTop": 20, "pageMarginBottom": 20, "svgViewBox": True, "breaks": "auto",

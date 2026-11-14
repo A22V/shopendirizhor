@@ -126,9 +126,10 @@ def prepare(musicxml_path=None, midi_path=None, staff_names=None):
     staff_names: если заданы, имена станов берутся по порядку (для рояля: правая рука, левая рука)."""
     import verovio
     import score_review
+    import score_player
     if not (musicxml_path and os.path.exists(musicxml_path)):
         musicxml_path = _midi_to_musicxml(midi_path)
-    tk = verovio.toolkit()
+    tk = score_player.make_toolkit()
     tk.setOptions(OPTIONS)
     # Файл читаем сами и отдаём verovio текстом (loadData): так не зависим от того, как библиотека
     # открывает путь на сервере. Если и так не вышло, в ошибке будет причина из самой библиотеки.
@@ -146,7 +147,7 @@ def prepare(musicxml_path=None, midi_path=None, staff_names=None):
         if variant in seen:
             continue
         seen.append(variant)
-        tk = verovio.toolkit()
+        tk = score_player.make_toolkit()
         tk.setOptions(OPTIONS)
         ok, why = score_player.load_verovio(tk, variant)
         if ok:
