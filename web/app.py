@@ -23,6 +23,7 @@ import reduction             # noqa: E402
 import score_review          # noqa: E402
 import score_fix             # noqa: E402
 import quality_gate          # noqa: E402
+import taste_check           # noqa: E402
 import score_notation        # noqa: E402
 import piano_review          # noqa: E402
 import resources             # noqa: E402
@@ -325,6 +326,12 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=
         gate = quality_gate.check(src, stem + ".mid", solo=bool(solo))
         report["quality_gate"] = {"ok": gate["ok"], "defects": gate["defects"], "warnings": gate["warnings"],
                                   "stats": gate["stats"]}
+        try:                                          # проверка по вкусу пользователя (src/taste_check.py), звук не меняет
+            import texture_fix as _tf
+            gate["taste"] = taste_check.check(src, stem + ".mid", solo=bool(solo), one_lead=_tf.one_lead_enabled())
+            report["taste_check"] = gate["taste"]
+        except Exception:
+            gate["taste"] = {"error": traceback.format_exc(limit=3)}
         json.dump(report, open(stem + "_report.json", "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     except Exception:
         gate = {"error": traceback.format_exc(limit=3)}
@@ -447,6 +454,21 @@ def show_gate(gate):
         st.markdown("**[%s, предупреждение]** %s" % (code, text))
         st.caption("Статус: " + status)
     st.caption("Контроль считает, а не слушает: «брака нет» не значит «звучит хорошо». Судья звучания — слушатель.")
+    tc = gate.get("taste")
+    if tc:
+        st.markdown("#### Проверка по вашему вкусу")
+        if tc.get("error"):
+            st.warning("Проверка по вкусу не выполнилась.")
+            with st.expander("Подробности для разработчика"):
+                st.code(tc["error"])
+        else:
+            names = {c: n for c, n, _ in taste_check.TASTE}
+            why = {c: w for c, _, w in taste_check.TASTE}
+            (st.success if not tc["failed"] else st.warning)("Выполнено %s пунктов." % tc["score"])
+            for c, msg in tc["failed"]:
+                st.markdown("**✗ [%s] %s** — %s" % (c, names[c], msg))
+                st.caption("Ваш отзыв: " + why[c])
+            st.caption("Выполнены: " + ", ".join("%s %s" % (c, names[c]) for c in tc["passed"]))
 
 
 def show_review(review, expanded=True):
@@ -881,7 +903,8 @@ if res:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         _g = res.get("gate") or {}
         z.writestr(res["name"] + "_контроль_брака.txt",
-                   quality_gate.text(_g) if "ok" in _g else "Контроль брака не выполнился:\n" + str(_g.get("error")))
+                   (quality_gate.text(_g) if "ok" in _g else "Контроль брака не выполнился:\n" + str(_g.get("error")))
+                   + ("\n\n" + taste_check.text(_g["taste"]) if isinstance(_g.get("taste"), dict) and "score" in _g["taste"] else ""))
         for ext in (".mid", ".musicxml", "_plan.json", "_report.json"):
             p = res["stem"] + ext
             if os.path.exists(p):

@@ -702,5 +702,28 @@ except Exception as _e:
 print("%-30s %s  %s" % ("мягкий верх", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- проверка по вкусу пользователя (taste_check, 2026-11-14): своя оркестровка считается; резкий верх ловится ---
+try:
+    import os as _os13, tempfile as _tf13, mido as _md13
+    import orchestrator as _o13, taste_check as _t13
+    _src13 = _os13.path.join(ROOT, "input", "nocturneincsharpminor.mid")
+    _st13 = _os13.path.join(_tf13.mkdtemp(prefix="taste_"), "o")
+    _o13.run(_src13, _st13)
+    _r13 = _t13.check(_src13, _st13 + ".mid")
+    _m13 = _md13.MidiFile(_st13 + ".mid")          # та же оркестровка, флейта и гобой на две октавы выше
+    for _tr in _m13.tracks:
+        if any(_x.type == "track_name" and _x.name in ("Flute", "Oboe") for _x in _tr):
+            for _i, _x in enumerate(_tr):
+                if _x.type in ("note_on", "note_off"):
+                    _tr[_i] = _x.copy(note=min(127, _x.note + 24))
+    _m13.save(_st13 + "_high.mid")
+    _h13 = _t13.check(_src13, _st13 + "_high.mid")
+    _ok = "score" in _r13 and any(c == "В1" for c, _ in _h13["failed"]) and "В1" in _t13.text(_h13)
+    _msg = "своя оркестровка: %s; флейта и гобой +2 октавы: В1 %s" % (_r13["score"], "пойман" if _ok else "НЕ пойман")
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("проверка по вкусу", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)
