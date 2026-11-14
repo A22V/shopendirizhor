@@ -261,8 +261,39 @@ if mode == "Оркестровка (из фортепиано)":
     perc = st.checkbox("Лёгкие ударные для ритма (как в эстрадно-симфоническом оркестре)", value=False, key="perc_pick",
                        help="Тихая бочка, обод малого барабана и хай-хэт по размеру такта; громкость следует фразам. "
                             "Ноты оркестра не меняются. Ударные есть в MIDI и MP3, в нотах их нет.")
+    plan_text = ""
+    with st.expander("План оркестровки от другой модели (Claude, ChatGPT и др.): скачать задание и вставить ответ"):
+        st.caption("Так можно не платить DeepSeek: скачайте задание, отдайте его любой модели (например, Claude), "
+                   "а присланный ею план вставьте сюда. Программа проверит план и расставит по нему ноты. "
+                   "Если окно пустое, работает обычный план.")
+        if up is not None:
+            try:
+                st.download_button("Скачать задание для плана (.txt)", plan_task_text(up.getvalue()),
+                                   file_name="задание_для_плана.txt", key="plan_task_dl")
+            except Exception:
+                st.warning("Не удалось подготовить задание: " + traceback.format_exc(limit=2))
+        else:
+            st.caption("Сначала загрузите пьесу.")
+        plan_text = st.text_area("Вставьте сюда план (JSON)", key="plan_text", height=160,
+                                 help="Текст, начинающийся с { и кончающийся }. Можно вместе с ```json … ```.").strip()
+        if plan_text:
+            try:
+                _pl = llm_planner.parse_plan(plan_text)
+                _bars = None
+                if up is not None:
+                    _bars = plan_bars(up.getvalue())
+                _pr = llm_planner.check_plan(_pl, _bars) if _bars else []
+                if _pr:
+                    st.error("В плане есть проблемы, оркестровка по нему не начнётся:\n- " + "\n- ".join(_pr))
+                    plan_text = ""
+                else:
+                    st.success("План принят: %d фраз." % len(_pl["phrases"]))
+            except Exception as _e:
+                st.error("Это не похоже на план (JSON): %s" % _e)
+                plan_text = ""
 else:
     perc = False
+    plan_text = ""
 orig_up = None
 if mode == PIANO_REVIEW_MODE:
     st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
@@ -273,7 +304,31 @@ go = st.button({"Оркестровка (из фортепиано)": "Созд�
                disabled=up is None, use_container_width=True)
 
 
-def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=None, perc=False, work=None):
+@st.cache_data(show_spinner=False, max_entries=4)
+def _piece_info(data: bytes):
+    """Разбор пьесы для задания и проверки чужого плана: (описание для модели, число тактов)."""
+    import tempfile as _tmp
+    with _tmp.TemporaryDirectory() as d:
+        pth = os.path.join(d, "p.mid")
+        open(pth, "wb").write(data)
+        s, events, melody, meta = orchestrator.analyze(pth)
+        n = len(meta["bars"])
+        return llm_planner.describe_piece(meta, melody, events, n), n
+
+
+def plan_bars(data: bytes):
+    return _piece_info(data)[1]
+
+
+def plan_task_text(data: bytes) -> str:
+    desc, n = _piece_info(data)
+    return ("ЗАДАНИЕ. Ниже правила и описание пьесы. Напишите план оркестровки и ответьте ТОЛЬКО JSON.\n\n"
+            "ПРАВИЛА:\n" + llm_planner.system_text() + "\n\nОПИСАНИЕ ПЬЕСЫ (%d тактов; фразы должны покрыть все такты 1..%d без дыр):\n"
+            % (n, n) + desc + "\n")
+
+
+def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=None, perc=False, work=None,
+            plan_text: str = ""):
     """Runs the full pipeline in a private temporary folder and returns the list of result files.
     prog: progress.Steps (шаги llm/plan, mp3, review, notes) или None."""
     _t0, _mem, _cur = time.time(), {}, [None]
@@ -291,8 +346,14 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=
     stem = os.path.join(work, "result")
     llm_log = None
     planner_info = None
-    step("llm" if use_llm_flag else "plan")
-    if use_llm_flag:
+    step("llm" if (use_llm_flag and not plan_text) else "plan")
+    if plan_text:                                     # готовый план от другой модели: проверен в окне, ноты расставляет программа
+        _pf = os.path.join(work, "plan_in.json")
+        json.dump(llm_planner.parse_plan(plan_text), open(_pf, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        log, issues, names = orchestrator.run(src, stem, "off", _pf, solo=solo, percussion=perc)
+        plan = json.load(open(stem + "_plan.json", encoding="utf-8"))
+        planner_info = {"provider": "вставлен вручную", "model_requested": None, "requests": 0}
+    elif use_llm_flag:
         llm_planner.MODELS_SERVED.clear()
         log, issues, names, llm_log, _pp = llm_planner.orchestrate_with_llm(
             src, stem, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY, solo=solo, percussion=perc)
@@ -656,8 +717,9 @@ elif go and up is not None:
         _steps = [("llm", "модель пишет план, программа расставляет ноты") if use_llm else ("plan", "план фраз и ноты"),
                   ("mp3", "запись MP3"), ("review", "рецензия"), ("notes", "ноты с пометками")]
         _data, _name = up.getvalue(), up.name
-        _jk = jobs.key(_data, {"name": _name, "llm": bool(use_llm), "solo": solo, "perc": bool(perc)})
-        jobs.start(_jk, lambda _p, _w: process(_data, _name, use_llm_flag=use_llm, prog=_p, solo=solo, perc=perc, work=_w),
+        _jk = jobs.key(_data, {"name": _name, "llm": bool(use_llm), "solo": solo, "perc": bool(perc), "plan": plan_text})
+        jobs.start(_jk, lambda _p, _w: process(_data, _name, use_llm_flag=use_llm, prog=_p, solo=solo, perc=perc, work=_w,
+                                               plan_text=plan_text),
                    _steps, progress.midi_seconds(_data))
         st.session_state.job, st.session_state.job_loaded, st.session_state.result = _jk, None, None
         try:
