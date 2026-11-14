@@ -68,7 +68,10 @@ def doubling_ratio(plist):
             notes += len(sounding); distinct += len(set(sounding))
     return notes / distinct if distinct else None
 
-def check_score(path):
+def check_score(path, piano_pcs=None):
+    """piano_pcs(доля) -> множество звуков рояля без октавы (0..11) в этот момент. Если дано, параллельная квинта,
+    оба звука которой в оба момента есть у рояля, идёт как HM32P (предупреждение: квинта есть в оригинале, программа
+    её только перенесла), а не как ошибка HM32 (2026-11-14)."""
     s0 = converter.parse(path)
     parts0 = list(s0.parts)
     names = [(p.partName or p.id or f"part{i}") for i, p in enumerate(parts0)]
@@ -110,7 +113,17 @@ def check_score(path):
                 i0 = abs(voices[y][a] - voices[x][a]) % 12
                 i1 = abs(voices[y][b] - voices[x][b]) % 12
                 if i0 == 7 and i1 == 7:
-                    issues.append(("error", "HM32", a, f"parallel fifths {names[x]}-{names[y]}"))
+                    own = False
+                    if piano_pcs is not None:
+                        try:
+                            own = ({voices[x][a] % 12, voices[y][a] % 12} <= piano_pcs(a)
+                                   and {voices[x][b] % 12, voices[y][b] % 12} <= piano_pcs(b))
+                        except Exception:
+                            own = False
+                    if own:
+                        issues.append(("warning", "HM32P", a, f"parallel fifths {names[x]}-{names[y]}"))
+                    else:
+                        issues.append(("error", "HM32", a, f"parallel fifths {names[x]}-{names[y]}"))
                 is_vln = "violin" in names[x].lower() and "violin" in names[y].lower()
                 if is_vln and abs(voices[y][a] - voices[x][a]) == 12 and abs(voices[y][b] - voices[x][b]) == 12:
                     issues.append(("warning", "HM05", a, f"parallel octaves {names[x]}-{names[y]}"))

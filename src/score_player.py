@@ -320,7 +320,8 @@ def prepare(data, name="score.mid", page_width=1500, scale=34):
             notes.append("Ударные звучат, но в нотах не показаны.")
         tmp_mid = os.path.join(work, "notation.mid")
         nm.save(tmp_mid)
-        sc = music21.converter.parse(tmp_mid, quantizePost=True)
+        import m21_fix
+        sc = m21_fix.parse_midi(tmp_mid, quantizePost=True)
         parts = _number(parts)
         for k, part in enumerate(sc.parts):
             if k < len(shown):

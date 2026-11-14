@@ -58,9 +58,24 @@ def _wav_has_sound(wav):
 def render_wav(mid, wav, sr=44100):
     global LAST_SOUNDFONT
     fs, sfs = find_fluidsynth(), all_soundfonts()
+    last_err = None
+    if not fs and sfs:
+        # 2026-11-14: программы fluidsynth нет, но есть её библиотека — пишем звук через неё (src/fluid_lib.py)
+        import fluid_lib
+        if fluid_lib.available():
+            for sf in sfs:
+                try:
+                    if os.path.exists(wav): os.remove(wav)
+                    fluid_lib.render_wav(mid, wav, sf, sr)
+                    if _wav_has_sound(wav):
+                        LAST_SOUNDFONT = sf
+                        return
+                    last_err = RuntimeError("тишина с банком " + os.path.basename(sf))
+                except Exception as e:
+                    last_err = e
+            raise RuntimeError("Не удалось сделать звук ни с одним банком: %s" % last_err)
     if not fs or not sfs:
         raise RuntimeError("Нет fluidsynth или звукового банка (.sf2). Запустите: python setup_check.py")
-    last_err = None
     for sf in sfs:
         # 2026-11-07: сначала с «загрузкой только нужных звуков» (synth.dynamic-sample-loading): банк MS Basic
         # занимал ~557 МБ, так ~201 МБ; звук побайтно тот же (проверено на пьесе 53 такта). Если версия
@@ -85,7 +100,18 @@ def render_mp3(mid, mp3, bitrate="128k"):
     render_wav(mid, wav)
     ff = shutil.which("ffmpeg")
     if ff:
-        subprocess.run([ff, "-y", "-loglevel", "error", "-i", wav, "-af", "loudnorm=I=-16", "-b:a", bitrate, mp3],
+        # 2026-11-14: программа fluidsynth пишет звук, пока не затухнут все струны (у рояля до ~30 с почти тишины
+        # после последней ноты; отсюда «3:05 вместо 2:38» в плеере). Запись обрезается: музыка + 5 с, затухание 2 с.
+        cut, af = [], "loudnorm=I=-16"
+        try:
+            import mido
+            _len = float(mido.MidiFile(mid).length)
+            if _len > 1.0:
+                cut = ["-t", "%.2f" % (_len + 5.0)]
+                af = "afade=t=out:st=%.2f:d=2,loudnorm=I=-16" % (_len + 3.0)
+        except Exception:
+            pass
+        subprocess.run([ff, "-y", "-loglevel", "error", "-i", wav] + cut + ["-af", af, "-b:a", bitrate, mp3],
                        check=True)
         os.remove(wav)
         return mp3

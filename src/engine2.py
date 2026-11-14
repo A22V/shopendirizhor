@@ -124,10 +124,15 @@ def pad_enabled():
     return os.environ.get("ORCH_PAD", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def _pad(run, t0, players, rng, place, melody_at):
+def _pad(run, t0, players, rng, place, melody_at, others=None, piano_pcs=None, pad_notes=None):
     """run = бегущие ноты фразы (начало, конец, высота). В каждой доле берутся разные высоты: верхняя — первой скрипке,
     следующая — второй, нижняя — валторне (если она свободна и высот не меньше двух). Одинаковые подряд сливаются в одну
-    долгую ноту. Нота не выше мелодии. Новых звуков нет: это те же ноты рояля, только тянущиеся (как под педалью)."""
+    долгую ноту. Нота не выше мелодии. Новых звуков нет: это те же ноты рояля, только тянущиеся (как под педалью).
+    2026-11-14: нота фона не ставится, если она образует параллельную квинту с другим голосом (others = уже
+    написанные партии, плюс уже готовые голоса фона), а у рояля такой квинты в эти моменты нет (piano_pcs).
+    Тогда пробуется другая нота той же доли; если нет — прежняя нота тянется дальше (когда она есть у рояля и
+    в этой доле), иначе голос долю молчит. Правило: Римский-Корсаков, «Практический учебник гармонии», §13;
+    способ исправления — эвристика. Критерий тот же, что в контроле брака (П3)."""
     if not run or not players:
         return {}
     import math
@@ -159,15 +164,122 @@ def _pad(run, t0, players, rng, place, melody_at):
                 seq[-1][1] += 1.0
             else:
                 seq.append([start, 1.0, p])
+    fixed_n = 0
+    if others is not None:
+        voices = {}
+        for nm, seq in others.items():
+            if nm in lines_:
+                continue
+            v = {}
+            for x in seq:
+                k_ = round(x[0], 3)
+                v[k_] = max(x[2], v.get(k_, -1))
+            if v:
+                voices[nm] = v
+
+        def clash(mine, t_, p_):
+            """mine = {начало: высота} уже принятых нот этого голоса; новая нота (t_, p_)."""
+            for nm, v in voices.items():
+                if t_ not in v:
+                    continue
+                prev = [x for x in mine if x < t_ and x in v]
+                if not prev:
+                    continue
+                tp = max(prev)
+                a0, b0, a1, b1 = mine[tp], v[tp], p_, v[t_]
+                if a0 == a1 or abs(a0 - b0) % 12 != 7 or abs(a1 - b1) % 12 != 7 or (a1 - a0) * (b1 - b0) <= 0:
+                    continue
+                if piano_pcs is not None and {a0 % 12, b0 % 12} <= piano_pcs(tp) and {a1 % 12, b1 % 12} <= piano_pcs(t_):
+                    continue       # квинта композитора: есть в нотах рояля
+                return True
+            return False
+
+        for n in players:
+            lo, hi = PAD_BAND[n]
+            lo, hi = max(lo, rng(n)[0]), min(hi, rng(n)[1])
+            mine, new = {}, []
+            for s, d, p in lines_[n]:
+                k_ = round(s, 3)
+                if clash(mine, k_, p):
+                    fixed_n += 1
+                    top = melody_at(s)
+                    alt = None
+                    for q in sorted(beats.get(int(math.floor(s - t0 + 1e-6)), ()), reverse=True):
+                        while q > hi: q -= 12
+                        while q < lo: q += 12
+                        if lo <= q <= hi and q != p and (top is None or q < top) and not clash(mine, k_, q):
+                            alt = q
+                            break
+                    if alt is None:
+                        if new and abs(new[-1][0] + new[-1][1] - s) < 1e-6 and piano_pcs is not None \
+                                and new[-1][2] % 12 in piano_pcs(s):
+                            new[-1][1] += d          # прежняя нота тянется дальше
+                        continue                     # иначе голос эту долю молчит
+                    p = alt
+                if new and new[-1][2] == p and abs(new[-1][0] + new[-1][1] - s) < 1e-6:
+                    new[-1][1] += d
+                else:
+                    new.append([s, d, p]); mine[k_] = p
+            lines_[n] = new
+            voices[n] = dict(mine)
     out = {}
+    if fixed_n:
+        out["fifths_avoided"] = fixed_n
     for n, seq in lines_.items():
         k = 0
         for s, d, p in seq:
             if place(n, s, d, p, "inner1" if n != "Horn" else "inner2"):
                 k += 1
+                if pad_notes is not None and others is not None:
+                    pad_notes.append((n, others[n][-1]))
         if k:
             out[n] = k
     return out
+
+
+def _pad_cleanup(lines, pad_notes, piano_pcs):
+    """Последняя проверка после раздачи всех нот: если нота фона всё ещё даёт параллельную квинту, которой нет у
+    рояля (например, с нотой, поставленной позже фона), эта нота фона убирается. Критерий — как в контроле брака (П3).
+    Мелодия, бас и ноты «как у рояля» не трогаются: убираются только добавленные тянущиеся ноты."""
+    removed = 0
+    for _ in range(40):
+        by = {}
+        for n, seq in lines.items():
+            v = {}
+            for x in seq:
+                k = round(x[0], 3)
+                if k not in v or x[2] > v[k][2]:
+                    v[k] = x
+            by[n] = v
+        pad_ids = {id(x): n for n, x in pad_notes}
+        victim = None
+        names = sorted(by)
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                A, B = by[names[i]], by[names[j]]
+                common = sorted(set(A) & set(B))
+                for t0, t1 in zip(common, common[1:]):
+                    a0, b0, a1, b1 = A[t0][2], B[t0][2], A[t1][2], B[t1][2]
+                    if a0 == a1 or abs(a0 - b0) % 12 != 7 or abs(a1 - b1) % 12 != 7 or (a1 - a0) * (b1 - b0) <= 0:
+                        continue
+                    if {a0 % 12, b0 % 12} <= piano_pcs(t0) and {a1 % 12, b1 % 12} <= piano_pcs(t1):
+                        continue
+                    for x in (A[t1], B[t1], A[t0], B[t0]):
+                        if id(x) in pad_ids:
+                            victim = x
+                            break
+                    if victim is not None:
+                        break
+                if victim is not None:
+                    break
+            if victim is not None:
+                break
+        if victim is None:
+            break
+        lines[pad_ids[id(victim)]].remove(victim)
+        pad_notes[:] = [(n, x) for n, x in pad_notes if x is not victim]
+        removed += 1
+    return removed
 
 
 def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
@@ -230,6 +342,14 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
         return False
 
     mel_on = [m["offset"] for m in melody]
+    pad_notes = []      # ноты тянущегося фона (ORCH_PAD): [(инструмент, нота в lines)]
+    _all = sorted((n[0], _sound_end(n[1], spans, sp_starts), n[2]) for n in notes)
+    _all_on = [x[0] for x in _all]
+
+    def piano_pcs(t):
+        """Какие звуки (без октавы) есть у рояля в момент t, с педалью; допуск как в контроле брака."""
+        i = bisect.bisect_left(_all_on, t + 0.13)
+        return {q % 12 for (s2, e2, q) in _all[:i] if e2 > t - 0.13}
 
     def melody_at(t):
         k = bisect.bisect_right(mel_on, t + 1e-6) - 1
@@ -352,7 +472,7 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                 st.setdefault("pad", {})["%d-%d" % (a_, b_)] = _pad(
                     [acc[i] for i in rest if acc[i][1] - acc[i][0] < SHORT], t0,
                     [n for n in ("Violin I", "Violin II", "Horn") if n in free and n not in used and (has_mel or n != "Horn")],
-                    rng, place, melody_at)
+                    rng, place, melody_at, lines, piano_pcs, pad_notes)
                 # валторна и фагот вступают вместе с мелодией (образец «Лунной»: вступление только струнные)
                 holders = [h for h in holders if h == "Bassoon" and has_mel]
             if spans:
@@ -417,6 +537,8 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
                     if not done:
                         done = rescue(s, e - s, p, free)
                     st["placed" if done else "dropped"] += 1
+    if pad_notes:
+        st["pad_fifths_removed"] = _pad_cleanup(lines, pad_notes, piano_pcs)
     log["engine2"] = st
 
 

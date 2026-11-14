@@ -407,6 +407,7 @@ try:
     _src = _os3.path.join(_os3.path.dirname(__file__), "..", "input", "nocturneincsharpminor.mid")
     _d3 = _tf3.mkdtemp()
     _pf3 = _os3.environ.pop("ORCH_PERFORM", None)      # слой «исполнитель» тоже пишет CC11: в этой проверке он выключен
+    _fw3 = _os3.environ.pop("ORCH_FOLLOW", None)       # 2026-11-14: если переключатель включён снаружи, прогон «без него» должен быть без него
     try:
         _o3.run(_src, _os3.path.join(_d3, "off"))
         _os3.environ["ORCH_FOLLOW"] = "1"
@@ -416,6 +417,7 @@ try:
             _os3.environ.pop("ORCH_FOLLOW", None)
     finally:
         if _pf3 is not None: _os3.environ["ORCH_PERFORM"] = _pf3
+        if _fw3 is not None: _os3.environ["ORCH_FOLLOW"] = _fw3
     def _cnt(path, ctl):
         n_ = 0
         for tr_ in _md3.MidiFile(path).tracks:
@@ -616,6 +618,64 @@ try:
 except Exception as _e:
     _ok = False; _msg = repr(_e)
 print("%-30s %s  %s" % ("слой «исполнитель»", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
+# --- «съехавшие такты» (m21_fix, 2026-11-14): music21 ставил такты со сдвигом, ноты оркестра уезжали от рояля ---
+# Ритм — тот, на котором ошибка найдена (аккорд через тактовую черту рядом с бегущими нотами); высоты — гамма.
+try:
+    import mido as _md10, tempfile as _tf10, os as _os10
+    import m21_fix as _mf10, orchestrator as _o10
+    _R10 = [(0.0, 0.25, 1), (0.0, 0.5, 1), (0.25, 0.25, 1), (0.5, 0.5, 2), (1.0, 0.25, 1), (1.0, 4.25, 1), (1.25, 0.25, 1),
+            (1.5, 0.25, 1), (1.75, 0.25, 1), (2.0, 0.25, 1), (2.25, 0.25, 1), (2.5, 0.25, 1), (2.75, 0.25, 1), (3.0, 1.25, 3),
+            (4.25, 0.25, 1), (4.5, 0.25, 1), (4.75, 0.25, 1), (5.0, 0.25, 1), (5.25, 0.25, 1), (5.5, 0.25, 1), (5.75, 0.25, 1),
+            (6.0, 0.25, 1), (6.25, 0.25, 1), (6.5, 0.25, 1), (6.75, 0.25, 1), (7.0, 1.0, 1), (8.0, 1.0, 1), (9.0, 0.25, 1),
+            (9.0, 2.5, 1), (9.25, 0.25, 1), (9.5, 0.25, 1), (9.75, 0.25, 1), (10.0, 0.25, 1), (10.25, 0.25, 1), (10.5, 0.25, 1),
+            (10.75, 0.25, 1), (11.0, 1.0, 2), (11.5, 0.5, 1)]
+    _ev10 = []
+    for _i, (_s, _d, _k) in enumerate(_R10):
+        for _j in range(_k):
+            _p = 60 + (_i * 2) % 12 + 4 * _j
+            _ev10.append((int(round(_s * 480)), 1, _p)); _ev10.append((int(round((_s + _d) * 480)), 0, _p))
+    _ev10.sort(key=lambda x: (x[0], x[1]))
+    _m10 = _md10.MidiFile(ticks_per_beat=480); _t10 = _md10.MidiTrack(); _m10.tracks.append(_t10); _last = 0
+    for _tick, _on, _p in _ev10:
+        _t10.append(_md10.Message("note_on" if _on else "note_off", note=_p, velocity=64 if _on else 0, time=_tick - _last)); _last = _tick
+    _f10 = _os10.path.join(_tf10.mkdtemp(prefix="drift_"), "drift.mid"); _m10.save(_f10)
+    _want = sorted({round(_s, 2) for _s, _d, _k in _R10})
+    _s10 = _mf10.parse_midi(_f10)
+    _got = sorted({round(float(_n.offset), 2) for _n in _s10.flatten().notes if _n.tie is None or _n.tie.type == "start"})
+    _, _, _mel10, _meta10 = _o10.analyze(_f10)
+    _ok = _got == _want and max(_x["offset"] for _x in _mel10) <= 11.5 + 1e-6
+    _msg = "начала нот совпадают с файлом (%d моментов); переставлено тактов: %d" % (len(_want), getattr(_s10, "regrid_moved", 0))
+    if not _ok: _msg = "начала нот НЕ совпадают: ждали до %.2f, получили до %.2f" % (_want[-1], _got[-1] if _got else -1)
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("съехавшие такты", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
+# --- тянущийся фон (ORCH_PAD) не создаёт параллельных квинт, которых нет у рояля (2026-11-14) ---
+try:
+    import os as _os11, tempfile as _tf11
+    import orchestrator as _o11, quality_gate as _q11
+    _src11 = _os11.path.join(ROOT, "input", "nocturneincsharpminor.mid")
+    _set11 = {"ORCH_ENGINE": "2", "ORCH_PAD": "1", "ORCH_ONE_LEAD": "1", "ORCH_MELODY_HELD": "1", "ORCH_FIGURE": "1", "ORCH_BASS": "1"}
+    _keep11 = {k: _os11.environ.get(k) for k in _set11}
+    try:
+        _os11.environ.update(_set11)
+        _st11 = _os11.path.join(_tf11.mkdtemp(prefix="pad5_"), "o")
+        _l11, _, _ = _o11.run(_src11, _st11)
+        _g11 = _q11.check(_src11, _st11 + ".mid")
+    finally:
+        for k, v in _keep11.items():
+            if v is None: _os11.environ.pop(k, None)
+            else: _os11.environ[k] = v
+    _pf11 = _g11["stats"].get("parallel_fifths", {})
+    _ok = _pf11.get("not_in_piano", 1) == 0 and _g11["stats"]["foreign"]["bad"] == 0
+    _msg = "квинт всего %s, из них созданных программой %s; чужих нот %s; убрано нот фона %s" % (
+        _pf11.get("total"), _pf11.get("not_in_piano"), _g11["stats"]["foreign"]["bad"], (_l11.get("engine2") or {}).get("pad_fifths_removed"))
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("фон без новых квинт", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)

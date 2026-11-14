@@ -48,7 +48,8 @@ def bar_of(starts, off):
     return max(0, bisect.bisect_right(starts, off + 1e-9) - 1)
 
 def analyze(path):
-    s = converter.parse(path)
+    import m21_fix
+    s = m21_fix.parse_midi(path)   # 2026-11-14: music21 мог ставить такты со сдвигом (см. m21_fix.py)
     ms = list(s.parts[0].getElementsByClass(stream.Measure))
     bars, tsigs = [], []
     for m in ms:
@@ -77,6 +78,7 @@ def analyze(path):
     for mm in s.recurse().getElementsByClass(tempo.MetronomeMark):
         tempos[round(float(mm.getOffsetInHierarchy(s)), 3)] = mm.number     # last mark at an offset wins
     meta = {"bars": bars, "tsigs": tsigs, "tempos": sorted(tempos.items())}
+    if getattr(s, "regrid_moved", 0): meta["regrid_moved"] = s.regrid_moved
     # сила нажатия пианиста по тактам (среднее velocity нот, начавшихся в такте); для ORCH_DYN_PIANO (см. phrase_planner)
     _vel = {}
     for pi, p in enumerate(s.parts):
@@ -764,6 +766,7 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
     if thin_changes: log["thin_changes"] = thin_changes
     if texture_fix.one_lead_enabled() and not solo: log["one_lead"] = _one_lead
     if meta.get("texture"): log["texture"] = meta["texture"]
+    if meta.get("regrid_moved"): log["regrid_moved"] = meta["regrid_moved"]   # такты, которые music21 поставил со сдвигом (m21_fix)
     if solo: log["solo"] = {"instrument": solo, "changes": solo_changes}
     dyn = {bi: ph["level"] for ph in plan["phrases"] for bi in range(ph["bars"][0] - 1, ph["bars"][1])}
     log["dynamics_by_bar"] = {b + 1: d for b, d in sorted(dyn.items())}
@@ -801,7 +804,17 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
     add_dynamics(written, dyn)   # dynamics must be written into the MusicXML too (MuseScore shows them)
     import xml_safe
     log["musicxml_fix"] = xml_safe.write_musicxml(written, out_stem + ".musicxml")
-    issues, names = validator.check_score(out_stem + ".musicxml")
+    _pcs = None
+    try:   # звуки рояля по долям (с педалью): чтобы валидатор отличал квинты оригинала (HM32P) от созданных программой (HM32)
+        import quality_gate as _qg
+        _pn, _, _, _ped, _ = _qg._notes(in_path)
+        _pn = sorted(_qg._with_pedal(_pn, _ped)); _ps = [x[0] for x in _pn]
+        def _pcs(t):
+            i = bisect.bisect_left(_ps, t + _qg.TOL)
+            return {q % 12 for (s2, e2, q, _n) in _pn[:i] if e2 > t - _qg.TOL}
+    except Exception:
+        _pcs = None
+    issues, names = validator.check_score(out_stem + ".musicxml", _pcs)
     json.dump({"plan_log": log, "issues": issues}, open(out_stem + "_report.json", "w", encoding="utf-8"),
               ensure_ascii=False, indent=2)
     return log, issues, names

@@ -110,7 +110,8 @@ def _midi_to_musicxml(midi_path):
     # копия под коротким латинским именем: music21 и verovio на сервере могут не справиться с русским путём
     tmp_in = os.path.join(tempfile.mkdtemp(prefix="midi_"), "input.mid")
     shutil.copyfile(midi_path, tmp_in)
-    sc = music21.converter.parse(tmp_in)
+    import m21_fix
+    sc = m21_fix.parse_midi(tmp_in)
     out = os.path.join(tempfile.mkdtemp(prefix="notation_"), "score.musicxml")
     import xml_safe
     xml_safe.write_musicxml(sc, out)
