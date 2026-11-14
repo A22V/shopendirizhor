@@ -207,6 +207,29 @@ if up is not None and up.size <= 2 * 1024 * 1024:
         with st.expander("Почему нет записи (для разработчика)"):
             st.code(_src["error"] or "причина неизвестна")
 
+@st.cache_data(show_spinner=False, max_entries=4)
+def _piece_info(data: bytes):
+    """Разбор пьесы для задания и проверки чужого плана: (описание для модели, число тактов)."""
+    import tempfile as _tmp
+    with _tmp.TemporaryDirectory() as d:
+        pth = os.path.join(d, "p.mid")
+        open(pth, "wb").write(data)
+        s, events, melody, meta = orchestrator.analyze(pth)
+        n = len(meta["bars"])
+        return llm_planner.describe_piece(meta, melody, events, n), n
+
+
+def plan_bars(data: bytes):
+    return _piece_info(data)[1]
+
+
+def plan_task_text(data: bytes) -> str:
+    desc, n = _piece_info(data)
+    return ("ЗАДАНИЕ. Ниже правила и описание пьесы. Напишите план оркестровки и ответьте ТОЛЬКО JSON.\n\n"
+            "ПРАВИЛА:\n" + llm_planner.system_text() + "\n\nОПИСАНИЕ ПЬЕСЫ (%d тактов; фразы должны покрыть все такты 1..%d без дыр):\n"
+            % (n, n) + desc + "\n")
+
+
 st.markdown(theme.SECTION("II", "Что сделать"), unsafe_allow_html=True)
 use_llm = False
 if LLM_READY:
@@ -302,29 +325,6 @@ if mode == PIANO_REVIEW_MODE:
 go = st.button({"Оркестровка (из фортепиано)": "Создать оркестровку", REVIEW_MODE: "Проверить партитуру",
                 PIANO_REVIEW_MODE: "Проверить переложение", ENSEMBLE_MODE: "Создать ансамбль"}.get(mode, "Создать переложение"),
                disabled=up is None, use_container_width=True)
-
-
-@st.cache_data(show_spinner=False, max_entries=4)
-def _piece_info(data: bytes):
-    """Разбор пьесы для задания и проверки чужого плана: (описание для модели, число тактов)."""
-    import tempfile as _tmp
-    with _tmp.TemporaryDirectory() as d:
-        pth = os.path.join(d, "p.mid")
-        open(pth, "wb").write(data)
-        s, events, melody, meta = orchestrator.analyze(pth)
-        n = len(meta["bars"])
-        return llm_planner.describe_piece(meta, melody, events, n), n
-
-
-def plan_bars(data: bytes):
-    return _piece_info(data)[1]
-
-
-def plan_task_text(data: bytes) -> str:
-    desc, n = _piece_info(data)
-    return ("ЗАДАНИЕ. Ниже правила и описание пьесы. Напишите план оркестровки и ответьте ТОЛЬКО JSON.\n\n"
-            "ПРАВИЛА:\n" + llm_planner.system_text() + "\n\nОПИСАНИЕ ПЬЕСЫ (%d тактов; фразы должны покрыть все такты 1..%d без дыр):\n"
-            % (n, n) + desc + "\n")
 
 
 def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=None, perc=False, work=None,
