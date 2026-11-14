@@ -678,5 +678,29 @@ except Exception as _e:
 print("%-30s %s  %s" % ("фон без новых квинт", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- «мягкий верх» (ORCH_SOFT_TOP): высокая фраза ведущего играется октавой ниже; без переключателя план прежний ---
+try:
+    import os as _os12, texture_fix as _tf12
+    _bars12 = [(4.0 * _i, 4.0) for _i in range(4)]
+    _mel12 = ([{"offset": float(_i), "dur": 1.0, "pitch": 62 + _i} for _i in range(8)] +          # такты 1-2: 62..69, в норме
+              [{"offset": 8.0 + _i, "dur": 1.0, "pitch": _p} for _i, _p in enumerate([72, 74, 76, 78, 84, 86, 74, 72])])   # такты 3-4: до 86, высоко
+    _plan12 = {"phrases": [{"bars": [1, 2], "level": "mp", "melody": [["Violin I", 0, 0.0]]},
+                           {"bars": [3, 4], "level": "mp", "melody": [["Violin I", 0, 0.0]]}]}
+    _k12 = _os12.environ.pop("ORCH_SOFT_TOP", None)
+    try:
+        _p0, _ = _tf12.one_lead(_plan12, _mel12, _bars12)
+        _os12.environ["ORCH_SOFT_TOP"] = "1"
+        _p1, _n1 = _tf12.one_lead(_plan12, _mel12, _bars12)
+    finally:
+        _os12.environ.pop("ORCH_SOFT_TOP", None)
+        if _k12 is not None: _os12.environ["ORCH_SOFT_TOP"] = _k12
+    _s0 = [ph["melody"][0][1] for ph in _p0["phrases"]]; _s1 = [ph["melody"][0][1] for ph in _p1["phrases"]]
+    _ok = _s0 == [0, 0] and _s1 == [0, -12] and _p1["phrases"][0]["melody"][0][0] == "Clarinet"
+    _msg = "сдвиг фраз без переключателя %s, с ним %s (ведущий %s)" % (_s0, _s1, _p1["phrases"][0]["melody"][0][0])
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("мягкий верх", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

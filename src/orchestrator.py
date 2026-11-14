@@ -743,7 +743,7 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
         plan, solo_changes, _pm = texture_fix.apply_solo(plan, solo, melody, meta["bars"])
         if _pm != "off": piano_mode = _pm
     if texture_fix.one_lead_enabled() and not solo:   # ORCH_ONE_LEAD=1: one melody carrier for the whole piece (texture_fix.one_lead)
-        plan, _one_lead = texture_fix.one_lead(plan, melody)
+        plan, _one_lead = texture_fix.one_lead(plan, melody, meta["bars"])
     if texture_fix.enabled():   # ORCH_THIN=1: thin out "walls of sound" (see texture_fix.py); off by default
         plan, thin_changes = texture_fix.thin_plan(plan)
     if texture_fix.bass_enabled():   # ORCH_BASS=1: add a double bass the planner forgot (see texture_fix.py)

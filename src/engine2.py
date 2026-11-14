@@ -351,10 +351,14 @@ def accompany(lines, notes, melody, plan, bars, fit, ranges, log, spans=None):
         i = bisect.bisect_left(_all_on, t + 0.13)
         return {q % 12 for (s2, e2, q) in _all[:i] if e2 > t - 0.13}
 
+    _soft = [(starts[ph["bars"][0] - 1], ph.get("soft_top", 0)) for ph in plan["phrases"]]
+    _soft_on = [x[0] for x in _soft]
+
     def melody_at(t):
         k = bisect.bisect_right(mel_on, t + 1e-6) - 1
         if k >= 0 and melody[k]["offset"] + melody[k]["dur"] > t - 1.0:
-            return melody[k]["pitch"]
+            j = bisect.bisect_right(_soft_on, melody[k]["offset"] + 1e-6) - 1
+            return melody[k]["pitch"] + (_soft[j][1] if j >= 0 else 0)     # ORCH_SOFT_TOP: мелодия фразы опущена
         return None
 
     for ph in plan["phrases"]:
@@ -718,6 +722,8 @@ def double_melody(lines, melody, plan, bars, fit, ranges, log):
             if n in busy or n not in lines:
                 continue
             shift = 12 if n == "Flute" and mean < 72 else 0
+            if ph.get("soft_top"):
+                shift = ph["soft_top"]          # ORCH_SOFT_TOP: удвоение в унисон с опущенным ведущим
             if all(ranges[n][0] <= m["pitch"] + shift <= ranges[n][1] for m in seg):
                 picked.append((n, shift))
         for n, shift in picked:

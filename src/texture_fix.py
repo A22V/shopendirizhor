@@ -408,7 +408,20 @@ def one_lead_enabled():
     return os.environ.get("ORCH_ONE_LEAD", "") not in ("", "0", "false", "False")
 
 
-def one_lead(plan, melody):
+# ORCH_SOFT_TOP=1 (2026-11-14, выкл. по умолчанию): отзыв пользователя на свою пьесу — ведущий «слишком задирает
+# верхние ноты, очень резко, режет слух» (кларнет до E6, 17% времени на C6 и выше; гобой и флейта в кульминации 50%).
+# ПОДТВЕРЖДЕНО по смыслу: Римский-Корсаков, «Основы оркестровки», т. 1, гл. I (деревянные духовые, с. 30–31 и
+# таблица В): флейты и кларнеты «в высших [регистрах] проявляют значительную резкость»; гобой: высокий «жидкий,
+# резкий», высший «оч. резкий». ЭВРИСТИКА: сами границы (таблица в PDF — картинка, числа не прочитаны) и способ:
+# фраза, где мелодия выше границы, целиком играется октавой ниже (если низ фразы остаётся в удобном регистре).
+SOFT_TOP = {"Clarinet": 82, "Flute": 86, "Oboe": 81, "Violin I": 88, "Cello": 69}
+
+
+def soft_top_enabled():
+    return os.environ.get("ORCH_SOFT_TOP", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def one_lead(plan, melody, bars=None):
     """Вся мелодия одному инструменту; удвоения только духовыми и только в кульминации не тише mf."""
     pit = [m["pitch"] for m in melody]
     if not pit:
@@ -419,13 +432,51 @@ def one_lead(plan, melody):
     lead = next((n for n in order if share[n] >= LEAD_FIT), None) or max(order, key=lambda n: share[n])
     plan = copy.deepcopy(plan)
     plan.pop("melody_owner", None)
+    lowered = []
+    if soft_top_enabled() and bars:
+        # фраза с широкой мелодией (верх выше границы, а целиком на октаву вниз не помещается) делится по тактовой
+        # черте на две части так, чтобы каждую можно было сыграть в удобной октаве; иначе остаётся как есть
+        def _seg(a_, b_):
+            t0 = bars[a_ - 1][0]
+            t1 = bars[b_][0] if b_ < len(bars) else float("inf")
+            return [m["pitch"] for m in melody if t0 - 1e-6 <= m["offset"] < t1 - 1e-6]
+
+        def _bad(a_, b_):
+            s = _seg(a_, b_)
+            if not s or max(s) <= SOFT_TOP[lead] or min(s) - 12 >= LEAD_BAND[lead][0]:
+                return 0
+            return sum(1 for p in s if p > SOFT_TOP[lead])
+        out = []
+        for ph in plan["phrases"]:
+            a_, b_ = ph["bars"]
+            if not ph.get("melody") or b_ - a_ < 1 or not _bad(a_, b_):
+                out.append(ph); continue
+            best = min(range(a_, b_), key=lambda k: (_bad(a_, k) + _bad(k + 1, b_), abs((k - a_ + 1) - (b_ - k))))
+            if _bad(a_, best) + _bad(best + 1, b_) >= _bad(a_, b_):
+                out.append(ph); continue
+            p1, p2 = copy.deepcopy(ph), copy.deepcopy(ph)
+            p1["bars"], p2["bars"] = [a_, best], [best + 1, b_]
+            out += [p1, p2]
+        plan["phrases"] = out
     for ph in plan["phrases"]:
         if not ph.get("melody"):
             continue
         ph["melody"] = [[lead, 0, 0.0]]
+        if soft_top_enabled() and bars:
+            a_, b_ = ph["bars"]
+            t0 = bars[a_ - 1][0]
+            t1 = bars[b_][0] if b_ < len(bars) else float("inf")
+            seg = [m["pitch"] for m in melody if t0 - 1e-6 <= m["offset"] < t1 - 1e-6]
+            if seg and max(seg) > SOFT_TOP[lead] and min(seg) - 12 >= LEAD_BAND[lead][0]:
+                ph["melody"] = [[lead, -12, 0.0]]
+                ph["soft_top"] = -12
+                lowered.append("%d-%d" % (a_, b_))
         for role in ("bass", "inner1", "inner2", "figuration"):
             if role in ph:
                 ph[role] = [x for x in ph[role] if x[0] != lead]
         loud = ph.get("climax") and ph.get("level") in ("mf", "f")
         ph["doublers"] = [x for x in ("Flute", "Oboe", "Clarinet") if x != lead][:2] if loud else []
-    return plan, ["one lead: %s (melody notes in its comfortable register: %d%%)" % (lead, round(100 * share[lead]))]
+    notes_ = ["one lead: %s (melody notes in its comfortable register: %d%%)" % (lead, round(100 * share[lead]))]
+    if lowered:
+        notes_.append("soft top: melody an octave lower in bars " + ", ".join(lowered))
+    return plan, notes_
