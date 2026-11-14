@@ -762,5 +762,21 @@ except Exception as _e:
 print("%-30s %s  %s" % ("шрифты verovio", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- мелодия правой руки скачком вниз (ORCH_MEL_TRACK): ноты остаются мелодией, «педальная» нота перебора — нет ---
+try:
+    import engine2 as _e15
+    _rh = [(0, 1, 74), (1, 1.5, 74), (1.5, 2, 67), (2, 2.5, 67), (2.5, 3, 71), (3, 4, 72),       # D5 D5 G4 G4 B4 C5
+           (4, 4.5, 84), (4.5, 5, 76), (5, 5.5, 83), (5.5, 6, 76), (6, 6.5, 84), (6.5, 7, 76)]   # C6 E5 B5 E5 C6 E5
+    _all = [(a, b, p, 0) for a, b, p in _rh] + [(0, 4, 43, 1), (4, 8, 45, 1)]
+    _m0 = {(m["offset"], m["pitch"]) for m in _e15.find_melody(_all)}
+    _m1 = {(m["offset"], m["pitch"]) for m in _e15.find_melody(_all, top_part=0)}
+    _ok = (1.5, 67) not in _m0 and (1.5, 67) in _m1 and (2, 67) in _m1 and (4.5, 76) not in _m1 and (5, 83) in _m1
+    _msg = "без переключателя G4 потерян: %s; с ним G4 в мелодии: %s; педальная E5 не в мелодии: %s" % (
+        (1.5, 67) not in _m0, (1.5, 67) in _m1, (4.5, 76) not in _m1)
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("мелодия правой руки", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

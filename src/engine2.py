@@ -58,12 +58,41 @@ def read_pedal(path):
     return spans
 
 
-def find_melody(allnotes):
+MEL_TRACK_MIN = 0.5   # эвристика: ORCH_MEL_TRACK не трогает ноты короче полдоли (бегущие перебор и арпеджио)
+
+
+def mel_track_enabled():
+    """ORCH_MEL_TRACK=1 (выкл. по умолчанию; 2026-11-15, «Откровения флейты»): если у пьесы отдельная дорожка правой
+    руки, нота этой дорожки, над которой ничего не звучит, считается мелодией, даже если она короткая и ниже прежней
+    ноты мелодии больше чем на большую терцию (правило ниже), и её не уносит распознавание арпеджио. Иначе мелодия,
+    спускающаяся скачком (тт. 17, 19, 21, 23), уходила к виолончели и альту. Эвристика."""
+    return os.environ.get("ORCH_MEL_TRACK", "") not in ("", "0", "false", "False")
+
+
+def pedal_tone(seq, k, window=2.0):
+    """Нота seq[k] — «педальная» нота перебора (как E5 в C6-E5-B5-E5-C6): тот же звук повторяется рядом (в пределах
+    window долей), а между повторами есть нота выше него больше чем на большую терцию. Такая нота — внутренний голос,
+    а не мелодия. seq — [(начало, высота)] нот одной дорожки по порядку. Эвристика."""
+    t0, p0 = seq[k]
+    for d in (-1, 1):
+        j, above = k + d, False
+        while 0 <= j < len(seq) and abs(seq[j][0] - t0) <= window:
+            if seq[j][1] == p0:
+                if above: return True
+                break
+            if seq[j][1] > p0 + 4: above = True
+            j += d
+    return False
+
+
+def find_melody(allnotes, top_part=None):
     """Мелодия: верхний голос. Нота — кандидат, если в момент начала над ней ничего не звучит (пальцами, без педали).
     Короткий кандидат принимается, только если он не ниже последней ноты мелодии больше чем на большую терцию
     (иначе это нота сопровождения, выглянувшая после снятой ноты мелодии). Эвристика."""
     by_start = sorted(allnotes)
     res, i, active, last = [], 0, [], None
+    _seq = sorted((n[0], n[2]) for n in allnotes if top_part is not None and len(n) > 3 and n[3] == top_part)
+    _idx = {x: k for k, x in enumerate(_seq)}
     while i < len(by_start):
         j = i
         while j < len(by_start) and by_start[j][0] - by_start[i][0] < 1e-6:
@@ -75,7 +104,10 @@ def find_melody(allnotes):
             dur = top[1] - top[0]
             ok = True
             if dur < SHORT and last is not None and on - last[1] < 4.0 and top[2] < last[2] - 4:
-                ok = False
+                _rec = sorted(m["dur"] for m in res[-4:])
+                ok = (top_part is not None and len(top) > 3 and top[3] == top_part
+                      and dur >= MEL_TRACK_MIN and len(_rec) >= 2 and dur >= 0.5 * _rec[len(_rec) // 2]
+                      and not pedal_tone(_seq, _idx[(top[0], top[2])]))
             if ok:
                 res.append({"offset": top[0], "dur": dur, "pitch": top[2]})
                 last = top

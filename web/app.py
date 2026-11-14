@@ -297,6 +297,8 @@ if mode == "Оркестровка (из фортепиано)":
                 st.warning("Не удалось подготовить задание: " + traceback.format_exc(limit=2))
         else:
             st.caption("Сначала загрузите пьесу.")
+        if st.button("Очистить окно плана", key="plan_clear"):
+            st.session_state["plan_text"] = ""
         plan_text = st.text_area("Вставьте сюда план (JSON)", key="plan_text", height=160,
                                  help="Текст, начинающийся с { и кончающийся }. Можно вместе с ```json … ```.").strip()
         if plan_text:
@@ -311,6 +313,9 @@ if mode == "Оркестровка (из фортепиано)":
                     plan_text = ""
                 else:
                     st.success("План принят: %d фраз." % len(_pl["phrases"]))
+                    if use_llm:
+                        st.warning("Пока в окне вставлен план, модель (%s) план НЕ пишет: берётся вставленный. "
+                                   "Чтобы план написала модель, нажмите «Очистить окно плана»." % PROVIDER)
             except Exception as _e:
                 st.error("Это не похоже на план (JSON): %s" % _e)
                 plan_text = ""
@@ -917,6 +922,10 @@ if res:
                     _k, _tm.get(_k, "?"), _v.get("rss_mb", "?")))
             st.caption("Цифры для вопроса «хватает ли облаку памяти». Они же лежат в report.json внутри ZIP.")
 
+    if ((res.get("report") or {}).get("planner") or {}).get("provider") == "вставлен вручную":
+        st.info("План: вставлен вручную в окно «План оркестровки от другой модели». Модель в этот раз не вызывалась.")
+    elif not res.get("llm_log"):
+        st.info("План: встроенный планировщик программы (модель не вызывалась).")
     if res.get("llm_log"):
         _pi = (res.get("report") or {}).get("planner") or {}
         st.info("План написала модель %s. Проверок плана: %d. Заказано: %s; сервис ответил: %s." % (

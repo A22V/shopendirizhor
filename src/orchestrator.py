@@ -166,11 +166,32 @@ def analyze(path):
         # ORCH_ENGINE=2 (проба, выкл. по умолчанию): сопровождение — переложение нота в ноту (src/engine2.py).
         meta["notes"] = allnotes
         meta["pedal"] = engine2.read_pedal(path)
-        melody = engine2.find_melody(allnotes)
+        _mt = top_pi if (engine2.mel_track_enabled() and len(by_part) > 1) else None   # ORCH_MEL_TRACK=1
+        melody = engine2.find_melody(allnotes, top_part=_mt)
         for i in range(len(melody) - 1):
             gap = melody[i + 1]["offset"] - melody[i]["offset"]
             if melody[i]["dur"] > gap: melody[i]["dur"] = gap
+        _keep = []
+        if _mt is not None:      # одноголосная правая рука: её ноту не считать арпеджио сопровождения
+            _top = sorted((n[0], n[1]) for n in allnotes if n[3] == _mt)
+            _st = [a for a, _ in _top]
+            def _alone(m):
+                k = bisect.bisect_right(_st, m["offset"] + 1e-6)
+                return sum(1 for a, b in _top[max(0, k - 8):k + 8] if a < m["offset"] + m["dur"] - 1e-6 and b > m["offset"] + 1e-6) <= 1
+            _seq = sorted((n[0], n[2]) for n in allnotes if n[3] == _mt)
+            _ix = {(round(a, 4), q): k for k, (a, q) in enumerate(_seq)}
+            _keep = [m for m in melody if (round(m["offset"], 4), m["pitch"]) in _ix and _alone(m)
+                     and not engine2.pedal_tone(_seq, _ix[(round(m["offset"], 4), m["pitch"])])]
         melody, _extra, _rep = split_arpeggio(melody, [])
+        if _keep:
+            _have = {(round(m["offset"], 4), m["pitch"]) for m in melody}
+            def _same_rhythm(x):   # длина как у мелодии рядом (±8 долей), иначе это бегущее сопровождение
+                near = sorted(m["dur"] for m in melody if abs(m["offset"] - x["offset"]) <= 8)
+                return bool(near) and x["dur"] >= max(engine2.MEL_TRACK_MIN - 1e-6, 0.5 * near[len(near) // 2])
+            _back = [m for m in _keep if (round(m["offset"], 4), m["pitch"]) not in _have and _same_rhythm(m)]
+            if _back:
+                melody = sorted(melody + _back, key=lambda m: m["offset"])
+                _rep = dict(_rep or {}, kept_right_hand=len(_back))
         meta["texture"] = _rep
         for e in events:
             m_on = [m for m in melody if m["offset"] <= e["offset"] + 0.999 and m["offset"] + m["dur"] > e["offset"]]
