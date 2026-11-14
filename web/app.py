@@ -394,7 +394,14 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=
                                   "stats": gate["stats"]}
         try:                                          # проверка по вкусу пользователя (src/taste_check.py), звук не меняет
             import texture_fix as _tf
-            gate["taste"] = taste_check.check(src, stem + ".mid", solo=bool(solo), one_lead=_tf.one_lead_enabled())
+            _plan_used = None
+            if os.path.exists(stem + "_plan.json"):
+                try:
+                    _plan_used = json.load(open(stem + "_plan.json", encoding="utf-8"))
+                except Exception:
+                    _plan_used = None
+            gate["taste"] = taste_check.check(src, stem + ".mid", solo=bool(solo), one_lead=_tf.one_lead_enabled(),
+                                              plan=_plan_used)
             report["taste_check"] = gate["taste"]
         except Exception:
             gate["taste"] = {"error": traceback.format_exc(limit=3)}

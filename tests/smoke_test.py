@@ -778,5 +778,17 @@ except Exception as _e:
 print("%-30s %s  %s" % ("мелодия правой руки", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- проверка по вкусу: смены носителя мелодии по плану ---
+try:
+    import taste_check as _t16
+    _pl = {"phrases": [{"melody": [[x, 0, None, None]]} for x in ["Violin I", "Flute", "Flute", "Oboe", "Violin I"]]}
+    _n, _o = _t16.plan_owner_changes(_pl)
+    _ok = _n == 3 and _t16.plan_owner_changes(None)[0] == 0
+    _msg = "смен по плану: %d (ожидалось 3)" % _n
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("вкус: смены по плану", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

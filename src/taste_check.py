@@ -69,8 +69,18 @@ def _lead_notes(O, melody):
     return out
 
 
-def check(piano_path, orch_path, solo=False, one_lead=False):
-    """Возвращает {"passed": [...], "failed": [(код, что не так)], "stats": {...}}."""
+def plan_owner_changes(plan):
+    """Сколько раз по плану меняется главный носитель мелодии (первый инструмент в "melody" фразы).
+    Нужна потому, что при удвоениях (скрипка I в унисон почти во всех фразах) замер по нотам не видит
+    смену тембра сверху: «Откровения флейты», план Haiku 2026-11-15 — 11 смен за 50 тактов, а по нотам 4."""
+    owners = [(ph.get("melody") or [[None]])[0][0] for ph in (plan or {}).get("phrases", [])]
+    owners = [o for o in owners if o]
+    return sum(1 for a, b in zip(owners, owners[1:]) if a != b), owners
+
+
+def check(piano_path, orch_path, solo=False, one_lead=False, plan=None):
+    """Возвращает {"passed": [...], "failed": [(код, что не так)], "stats": {...}}.
+    plan — план оркестровки (dict), если есть: смены носителя мелодии считаются и по нему."""
     P, _, _, pedal, bpb = qg._notes(piano_path)
     P = qg._with_pedal(P, pedal)
     O, names, _, _, obpb = qg._notes(orch_path)
@@ -116,7 +126,14 @@ def check(piano_path, orch_path, solo=False, one_lead=False):
     cnt = collections.Counter(leads)
     many = [n for n, k in cnt.most_common() if k >= LEAD_MIN_SHARE * max(len(leads), 1)]
     stats["leading_instruments"] = {n: round(cnt[n] / len(leads), 2) for n in many}
-    if hops and bars / hops < HOP_BARS_MIN:
+    p_hops, _owners = plan_owner_changes(plan)
+    if plan is not None:
+        stats["plan_owner_changes"] = p_hops
+    if p_hops and bars / p_hops < HOP_BARS_MIN and not solo and p_hops > hops:
+        failed.append(("В2", "По плану мелодию ведут по очереди: %d смен за %d тактов (раз в %.1f такта): %s."
+                       % (p_hops, bars, bars / p_hops, " → ".join(RU.get(o, o) for i, o in enumerate(_owners)
+                                                                  if i == 0 or o != _owners[i - 1]))))
+    elif hops and bars / hops < HOP_BARS_MIN:
         failed.append(("В2", "Мелодия переходит к другому инструменту %d раз за %d тактов (раз в %.1f такта)."
                        % (hops, bars, bars / hops)))
     elif len(many) > LEADS_MAX and not solo:
