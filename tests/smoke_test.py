@@ -337,7 +337,7 @@ if not _ok: failed += 1
 # строгий режим планировщика (LLM_STRICT): температура 0, правила в инструкции, замечания контроля брака в обратной связи
 try:
     import importlib, tempfile as _tf, os as _os, json as _js
-    _os.environ["LLM_STRICT"] = "1"
+    _os.environ["LLM_STRICT"] = "1"; _os.environ["LLM_TASTE"] = "0"   # вкус проверяется отдельным блоком
     import llm_planner as _L
     importlib.reload(_L)
     _pl = _os.path.join(_os.path.dirname(__file__), "..", "tests", "pieces", "Waltz_Dmajor_piano_plan_5ce53e16.json")
@@ -348,7 +348,7 @@ try:
         _L.orchestrate_with_llm(_mid, _os.path.join(_tf.mkdtemp(), "w"), "deepseek", "m", "k",
                                 call=lambda p_, m_, k_, s_, u_, **kw: (_calls.append((s_, u_)) or _txt))
         _ok = "STRICT RULES" in _calls[0][0]
-    _os.environ.pop("LLM_STRICT", None)
+    _os.environ.pop("LLM_STRICT", None); _os.environ.pop("LLM_TASTE", None)
     importlib.reload(_L)
     _ok = _ok and _L.TEMPERATURE == 0.3
 except Exception as _e:
@@ -788,6 +788,27 @@ try:
 except Exception as _e:
     _ok = False; _msg = repr(_e)
 print("%-30s %s  %s" % ("вкус: смены по плану", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
+# --- вкус пользователя в задании модели (LLM_TASTE) ---
+try:
+    import llm_planner as _l17
+    _txt = _l17.system_text()
+    _ping = {"phrases": [{"id": i, "bars": [a, a + 3], "level": "mf", "melody": [[n, 0, None, None]]}
+                         for i, (n, a) in enumerate([("Violin I", 1), ("Flute", 5), ("Oboe", 9), ("Flute", 13),
+                                                     ("Violin I", 17), ("Oboe", 21)], 1)]}
+    _one = {"phrases": [{"id": 1, "bars": [1, 24], "level": "mf", "melody": [["Clarinet", 0, None, None]]}]}
+    _vio = {"phrases": [{"id": 1, "bars": [1, 24], "level": "mf", "melody": [["Violin I", 0, None, None]]}]}
+    _p1 = _l17.taste_problems(_ping, 24)
+    _ok = (_l17.TASTE and "T1" in _txt and "T4" in _txt
+           and any(x.startswith("T1") for x in _p1)
+           and not _l17.taste_problems(_one, 24)
+           and any(x.startswith("T4") for x in _l17.taste_problems(_vio, 24)))
+    _msg = "задание %d символов; перекличка: %d замечаний; один ведущий: %d; скрипка весь кусок: %d" % (
+        len(_txt), len(_p1), len(_l17.taste_problems(_one, 24)), len(_l17.taste_problems(_vio, 24)))
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("вкус в задании модели", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)

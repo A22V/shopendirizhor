@@ -165,8 +165,31 @@ SYSTEM_STRICT = SYSTEM_CZERNY + (
 )
 
 
+# Вкус пользователя в задании модели (LLM_TASTE, по умолчанию ВКЛЮЧЕНО: одобрено пользователем 2026-11-15 «Да»).
+# Каждый пункт — из его собственного вердикта на слух; те же пункты проверяет src/taste_check.py.
+# Высокий верх деревянных «резкий»: Римский-Корсаков, «Основы оркестровки», т. 1, гл. I, с. 30-31 (подтверждено
+# по смыслу); границы в полутонах и числа «раз в 8 тактов», «60%» — эвристика (из отзывов пользователя).
+TASTE = os.environ.get("LLM_TASTE", "1") == "1"
+SYSTEM_TASTE = (
+    " THE LISTENER'S TASTE (he judges the result by ear; these are his own verdicts, follow them strictly). "
+    "(T1) ONE leader per section. Give the melody to a single instrument and keep it for the whole section. "
+    "Change the carrier only at a section border and NEVER more often than once per 8 bars; for a short piece "
+    "(up to about 30 bars) one carrier for the whole piece is better. He rejected plans that pass the melody "
+    "around: 'the same ping-pong of instruments as before'. "
+    "(T2) Doubling in unison or an octave is fine and welcome in loud phrases, but the carrier itself must not change. "
+    "(T3) Do not drive the melody or its doubling high: it cuts the ear. Keep the melody below A5 for the oboe, "
+    "below A#5 for the clarinet, below D6 for the flute, below E6 for violin I. If the written melody lies higher, "
+    "choose another instrument or shift the whole phrase an octave down, but never leave an instrument screaming on top. "
+    "(T4) Violin I must not lead more than about 60 percent of the piece: a violin that solos all the time he dislikes. "
+    "(T5) Use the whole ensemble: an instrument with almost no notes at all (less than a few per piece) is a defect, "
+    "unless the piece is built on one leader. Let the double bass play. "
+    "(T6) The orchestra must not shout over the piano original: keep levels mp/mf and save f for a real climax."
+)
+
+
 def system_text():
-    return SYSTEM_STRICT if STRICT else (SYSTEM_CZERNY if CZERNY else SYSTEM)
+    base = SYSTEM_STRICT if STRICT else (SYSTEM_CZERNY if CZERNY else SYSTEM)
+    return (base + SYSTEM_TASTE) if TASTE else base
 
 
 def describe_piece(meta, melody, events, n_bars):
@@ -194,6 +217,38 @@ def describe_piece(meta, melody, events, n_bars):
     return "\n".join(lines)
 
 
+HOP_BARS = 8          # смена ведущего не чаще раза в 8 тактов (эвристика: отзывы пользователя, 12.62)
+LEAD_SHARE_MAX = 0.6  # скрипка I ведёт не больше 60% тактов (эвристика: отзыв 2026-11-07)
+
+
+def taste_problems(plan, n_bars):
+    """Нарушения вкуса пользователя (T1, T4), считаются по самому плану. Пусто = всё хорошо.
+    Идут в круг исправлений модели только при LLM_TASTE=1; структурные проверки не затрагивают."""
+    if not TASTE:
+        return []
+    out, owners = [], []
+    for ph in (plan or {}).get("phrases", []) or []:
+        mel = ph.get("melody") or []
+        a, b = (ph.get("bars") or [0, 0])[:2]
+        owners.append((str(mel[0][0]) if mel and mel[0] else None, a, b))
+    named = [o for o in owners if o[0]]
+    hops = [(prev, cur) for prev, cur in zip(named, named[1:]) if prev[0] != cur[0]]
+    if hops and n_bars / float(len(hops)) < HOP_BARS:
+        out.append("T1 (the listener's taste): the melody carrier changes %d times in %d bars, that is once per %.1f "
+                   "bars. He rejects this ping-pong. Keep one leader per section, no more often than once per %d bars: %s"
+                   % (len(hops), n_bars, n_bars / float(len(hops)), HOP_BARS,
+                      " -> ".join("%s(bars %s-%s)" % o for o in named)))
+    bars_of = {}
+    for name, a, b in named:
+        bars_of[name] = bars_of.get(name, 0) + max(0, int(b) - int(a) + 1)
+    for name, cnt in bars_of.items():
+        if name in ("Violin I", "Violin") and n_bars and cnt / float(n_bars) > LEAD_SHARE_MAX:
+            out.append("T4 (the listener's taste): violin I leads %d of %d bars (%.0f%%); he dislikes a violin that "
+                       "solos all the time. Give part of the melody to a wind instead."
+                       % (cnt, n_bars, 100.0 * cnt / n_bars))
+    return out
+
+
 def plan_with_model(provider, model, api_key, description, n_bars, max_rounds=3, call=call_model):
     """Ask the model, check, and feed problems back. Returns (plan, log)."""
     log = []
@@ -204,11 +259,14 @@ def plan_with_model(provider, model, api_key, description, n_bars, max_rounds=3,
             plan = parse_plan(text)
         except Exception as e:
             problems = ["answer is not valid JSON: %s" % e]
+            taste = []
         else:
             problems = check_plan(plan, n_bars)
-        log.append({"round": round_no, "problems": problems})
-        if not problems:
+            taste = taste_problems(plan, n_bars)
+        log.append({"round": round_no, "problems": problems + taste})
+        if not problems and (not taste or round_no > 1):   # вкус просим исправить один раз: каждый круг платный
             return plan, log
+        problems = problems + taste
         user = description + "\n\nYour previous plan had these problems, fix them and answer with JSON only:\n- " + \
                "\n- ".join(problems)
     raise RuntimeError("planner failed after %d rounds: %s" % (max_rounds, log[-1]["problems"]))
@@ -264,8 +322,16 @@ def orchestrate_with_llm(in_path, out_stem, provider, model, api_key, call=call_
             plan = parse_plan(text)
         except Exception as e:
             problems = ["answer is not valid JSON: %s" % e]
+            taste = []
         else:
             problems = check_plan(plan, n_bars)
+            taste = taste_problems(plan, n_bars)
+        if taste and r == 1 and not problems:
+            # вкус пользователя: просим переписать, но если модель упрётся, на последнем круге план всё равно берём
+            attempts.append({"round": r, "taste": taste})
+            user = description + "\n\nYour plan breaks the listener's taste, fix it and answer with JSON only:\n- " + "\n- ".join(taste)
+            continue
+        problems = problems + (taste if problems else [])
         if problems:
             attempts.append({"round": r, "structure": problems})
             user = description + "\n\nYour plan has these structural problems, fix them and answer with JSON only:\n- " + "\n- ".join(problems)
