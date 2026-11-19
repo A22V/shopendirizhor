@@ -622,6 +622,27 @@ def plan_with_model(in_path, ensemble, provider, model, api_key, call=None, max_
     return None, log
 
 
+# ORCH ансамбль, dyn=True (2026-11-20, жалоба «все перекрикивают друг друга» на Менуэте Баха: у файла сила нажатия у ВСЕХ
+# нот 127, после переноса все партии получили 120 и мелодия не отличалась от сопровождения). Если у источника сила
+# нажатия плоская (разброс <= 3), роли задаются заново: мелодия FLAT_MEL, сопровождение FLAT_ACC, самый нижний голос
+# FLAT_LOW. Числа — эвристика (иерархия по ролям: см. урок «стена звука» в CLAUDE.md, п. 5). Живую силу нажатия не трогает.
+FLAT_SPREAD, FLAT_MEL, FLAT_ACC, FLAT_LOW = 3, 70, 56, 50
+
+
+def flat_source(notes):
+    v = [n["v"] for n in notes]
+    return bool(v) and max(v) - min(v) <= FLAT_SPREAD
+
+
+def apply_flat_dynamics(parts, piano, voices, ens_piano):
+    low = None if ens_piano else voices[-1]
+    for w, seq in parts.items():
+        for n in seq:
+            n["v"] = FLAT_MEL if n.get("mel") else (FLAT_LOW if w == low else FLAT_ACC)
+    for n in (piano or []):
+        n["v"] = FLAT_MEL if n["id"] in set() else FLAT_ACC
+
+
 def _track(name, ch, program, pan, seq, extra=()):
     ev = []
     for n in seq:
@@ -641,7 +662,7 @@ def _track(name, ch, program, pan, seq, extra=()):
     return tr
 
 
-def arrange(in_path, out_stem, ensemble, plan=None, legato=False, mono=False):
+def arrange(in_path, out_stem, ensemble, plan=None, legato=False, mono=False, dyn=False):
     """Пишет <out_stem>.mid и возвращает отчёт (словарь). ensemble — ключ из ENSEMBLES.
     plan — проверенный план модели (кто ведёт мелодию по фразам, где legato) или None: тогда как в версии 1.
     legato=True — связная игра во всей пьесе (без плана) или там, где так решил план.
@@ -667,6 +688,11 @@ def arrange(in_path, out_stem, ensemble, plan=None, legato=False, mono=False):
         stat["melody_shift"] = sh
         piano = None
     piano_mel = stat.pop("_piano_mel", set())
+    if dyn and flat_source(notes):
+        apply_flat_dynamics(parts, piano, voices, ens["piano"])
+        if piano is not None:
+            for n in piano: n["v"] = FLAT_MEL if n["id"] in piano_mel else FLAT_ACC
+        stat["flat_dynamics"] = "сила нажатия источника плоская: мелодия %d, сопровождение %d, нижний голос %d" % (FLAT_MEL, FLAT_ACC, FLAT_LOW)
     if mono: stat["mono_melody_dropped"] = n_mel - len(mel)
     stat["pedal_sustained"] = sum(_sustain(parts[v], pedal, tpb) for v in voices)
     stat["legato_extended"] = sum(_legato(parts[v], tpb) for v in voices)
@@ -758,4 +784,4 @@ if __name__ == "__main__":
     else:                                        # ... пьеса.mid выход состав [--legato] [--plan план.json]
         import json
         _plan = json.load(open(sys.argv[sys.argv.index("--plan") + 1], encoding="utf-8")) if "--plan" in sys.argv else None
-        print(text(arrange(sys.argv[1], sys.argv[2], sys.argv[3], plan=_plan, legato="--legato" in sys.argv, mono="--mono" in sys.argv)))
+        print(text(arrange(sys.argv[1], sys.argv[2], sys.argv[3], plan=_plan, legato="--legato" in sys.argv, mono="--mono" in sys.argv, dyn="--dyn" in sys.argv)))
