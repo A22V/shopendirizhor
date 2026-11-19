@@ -811,5 +811,22 @@ except Exception as _e:
 print("%-30s %s  %s" % ("вкус в задании модели", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# --- гобой и флейта подыгрывают (ORCH_WINDS_DBL) ---
+try:
+    import texture_fix as _tf
+    _pl = {"phrases": [
+        {"id": 1, "bars": [1, 8], "level": "mp", "melody": [["Clarinet", 0, None, None]], "inner1": [["Oboe", 0, None, None]]},
+        {"id": 2, "bars": [9, 16], "level": "mf", "melody": [["Clarinet", 0, None, None]], "doublers": ["Violin I"]},
+        {"id": 3, "bars": [17, 20], "level": "f", "climax": True, "melody": [["Clarinet", 0, None, None]]}]}
+    _q, _c = _tf.add_wind_doublers(_pl)
+    _ok = ("extra_doublers" not in _q["phrases"][0] and _q["phrases"][1]["extra_doublers"] == ["Oboe"]
+           and _q["phrases"][2]["extra_doublers"] == ["Oboe", "Flute"] and len(_c) == 3
+           and "extra_doublers" not in _pl["phrases"][1])
+    _msg = "изменений %d (гобой в mf и кульминации, флейта только в кульминации)" % len(_c)
+except Exception as _e:
+    _ok = False; _msg = repr(_e)
+print("%-30s %s  %s" % ("гобой и флейта подыгрывают", "OK " if _ok else "FAIL", _msg))
+if not _ok: failed += 1
+
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)

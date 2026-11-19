@@ -773,6 +773,9 @@ def run(in_path, out_stem, piano_mode="off", plan_path=None, solo=None, percussi
     if texture_fix.winds_enabled():  # ORCH_WINDS=1: add winds the planner forgot (see texture_fix.py)
         plan, _wc = texture_fix.fill_winds(plan)
         thin_changes = list(thin_changes) + _wc
+    if texture_fix.wind_dbl_enabled():  # ORCH_WINDS_DBL=1: silent oboe/flute quietly double the melody (engine 2)
+        plan, _wd = texture_fix.add_wind_doublers(plan)
+        thin_changes = list(thin_changes) + _wd
     if texture_fix.figure_enabled():  # ORCH_FIGURE=1: running accompaniment nobody plays -> a string (see texture_fix.py)
         plan, _fc = texture_fix.fill_figuration(plan, meta["fig"], meta["bars"])
         thin_changes = list(thin_changes) + _fc

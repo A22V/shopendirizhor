@@ -209,6 +209,39 @@ def fill_winds(plan):
     return plan, changes
 
 
+# ORCH_WINDS_DBL=1 (2026-11-19, одобрено на слух: пара «гобой молчит / подыгрывает», «Вариант B как будто лучше»).
+# Гобой и флейта, которых план нигде не назвал, тихо удваивают мелодию в унисон: гобой во фразах mf/f/кульминации,
+# флейта только в кульминации (иначе в фразе растёт число «ведущих», правило вкуса В2). Новых нот не придумывает:
+# те же ноты мелодии. Работает при ORCH_ENGINE=2 (читает engine2.double_melody, поле плана extra_doublers).
+# База IRCAM: гобой и флейта у мастеров в 41% и 33% тактов (измерено, 12.76); числа и порядок — эвристика.
+# ---------------------------------------------------------------------------
+def wind_dbl_enabled():
+    return os.environ.get("ORCH_WINDS_DBL", "") not in ("", "0", "false", "False")
+
+
+def add_wind_doublers(plan):
+    plan = copy.deepcopy(plan)
+    phrases = plan.get("phrases", [])
+    # движок 2 читает из плана только мелодию и удвоения: «назван» = ведёт мелодию или удваивает её
+    named = set()
+    for ph in phrases:
+        named |= {sp[0] for sp in ph.get("melody", [])}
+        named |= {d for d in (ph.get("doublers") or []) if isinstance(d, str)}
+    changes = []
+    for w, only_climax in (("Oboe", False), ("Flute", True)):
+        if w in named:
+            continue
+        for ph in phrases:
+            loud = ph.get("climax") or ph.get("level") in LOUD
+            if not loud or (only_climax and not ph.get("climax")) or not ph.get("melody"):
+                continue
+            ex = list(ph.get("extra_doublers") or [])
+            if w not in ex:
+                ph["extra_doublers"] = ex + [w]
+                changes.append("такты %d–%d: %s подыгрывает мелодии" % (ph["bars"][0], ph["bars"][1], WIND_RU[w]))
+    return plan, changes
+
+
 # ---------------------------------------------------------------------------
 # Солирующий инструмент на выбор и режим «как в Болеро» (2026-11-07, по просьбе пользователя; выбирается при каждой
 # оркестровке, по умолчанию «нет» — тогда план не меняется). Не правило для всех пьес, а режим.

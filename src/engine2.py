@@ -736,7 +736,8 @@ def double_melody(lines, melody, plan, bars, fit, ranges, log):
         own = ph.get("doublers") if isinstance(ph.get("doublers"), list) else None   # план сам назвал, кто удваивает (2026-11-12)
         if own is not None:
             want = len(own)
-        if not carriers or want <= 0:
+        extras = [n for n in (ph.get("extra_doublers") or []) if isinstance(n, str)]   # ORCH_WINDS_DBL: молчащие духовые подыгрывают
+        if not carriers or (want <= 0 and not extras):
             continue
         a_, b_ = ph["bars"]
         t0 = starts[a_ - 1]
@@ -748,10 +749,10 @@ def double_melody(lines, melody, plan, bars, fit, ranges, log):
         busy = set(carriers) | {n for n, ns in lines.items() if any(t0 - 1e-6 <= x[0] < t1 - 1e-6 for x in ns)}
         kind = "string" if carriers[0] in ("Violin I", "Violin II", "Viola", "Cello") else "wind"
         picked = []
-        for n in (own if own is not None else PARTNERS[kind]):
-            if len(picked) >= want:
-                break
-            if n in busy or n not in lines:
+        for n in list(own if own is not None else PARTNERS[kind]) + extras:
+            if len(picked) >= want and n not in extras:
+                continue
+            if n in busy or n not in lines or any(n == q for q, _ in picked):
                 continue
             shift = 12 if n == "Flute" and mean < 72 else 0
             if ph.get("soft_top"):
