@@ -261,6 +261,9 @@ if mode == ENSEMBLE_MODE:
                           help="Если у всех нот файла одна и та же сила нажатия (так бывает у нотных редакторов), все партии "
                                "играют одинаково громко и «перекрикивают» друг друга. С галочкой мелодия получает больше, "
                                "сопровождение меньше, нижний голос ещё тише. У файлов с живой динамикой ничего не меняется.")
+    ens_bass = st.checkbox("Низкие звуки — виолончели (в составах без рояля)", value=False, key="ens_bass",
+                           help="Без галочки левую руку почти целиком забирает альт, а виолончель молчит. С галочкой звуки "
+                                "ниже ля малой октавы идут виолончели. Это проба: решает ваше ухо.")
     ens_llm = False
     if LLM_READY:
         ens_llm = st.checkbox("План от модели (%s): кто ведёт мелодию в каждой фразе и где играть связно" % PROVIDER,
@@ -671,7 +674,7 @@ elif go and up is not None and mode == ENSEMBLE_MODE:
                 _plan, _plog = None, None
                 if ens_llm and LLM_READY:
                     _plan, _plog = ensemble.plan_with_model(_src, ens_pick, PROVIDER, PROVIDER_MODEL, PROVIDER_KEY)
-                _rep = ensemble.arrange(_src, _stem, ens_pick, plan=_plan, legato=ens_legato, mono=ens_mono, dyn=ens_dyn)
+                _rep = ensemble.arrange(_src, _stem, ens_pick, plan=_plan, legato=ens_legato, mono=ens_mono, dyn=ens_dyn, bass=ens_bass)
                 if _plog: _rep["planner"] = _plog
                 try:
                     _gate = quality_gate.check(_src, _stem + ".mid", melody=ensemble.melody_beats(_src, mono=ens_mono))

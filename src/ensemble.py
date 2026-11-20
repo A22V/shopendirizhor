@@ -92,6 +92,7 @@ SING_GAP = 1.0       # связная игра: нота тянется до с�
 SING_BASS = 4.0      # ... у нижнего голоса — до следующего баса, если он не дальше 4 долей (как BASS_HOLD_MAX)
 LEAD_MIN_BARS = 2    # план: ведущий держит мелодию не меньше двух тактов (у мастеров кусок — медиана 2,8 такта)
 LEAD_FIT = 0.9       # план: ведущему (не верхнему) должны быть по диапазону не меньше 90% нот мелодии фразы
+BASS_PEN = 12.0      # bass=True: нижнюю ноту аккорда (не мелодию, не выше BASS_TOP) берёт не нижний голос — штраф (эвристика)
 LEGATO_GAP = 0.5     # ORCH_LEGATO=1: как в src/smooth.py
 
 
@@ -192,7 +193,7 @@ def _groups(notes, tpb):
     return out
 
 
-def distribute(notes, voices, mel, tpb, shift0=0, lead_at=None):
+def distribute(notes, voices, mel, tpb, shift0=0, lead_at=None, bass=False):
     """Составы без рояля: каждая нота рояля — одному голосу; голоса по высоте сверху вниз (voices: сверху вниз).
     lead_at(тик) -> номер голоса, который ведёт мелодию (по плану); без плана ведёт верхний голос (0).
     Ведущий не верхний голос играет мелодию на её высоте (без переноса), остальные идут под ним по порядку."""
@@ -264,6 +265,7 @@ def distribute(notes, voices, mel, tpb, shift0=0, lead_at=None):
             for r in range(imin, K):
                 i = ordv[r]
                 c, p = cost_one(n, i)
+                if bass and len(g) >= 2 and j == len(g) - 1 and n["id"] not in mel and n["p"] <= BASS_TOP and r != K - 1: c += BASS_PEN
                 if acc and acc[-1][2] < p: c += CROSS      # голос ниже оказался бы выше соседа
                 acc.append((n, i, p)); rec(j + 1, r + 1, acc, total + c); acc.pop()
             rec(j + 1, imin, acc, total)                   # нота никому (штраф считается в конце)
@@ -662,7 +664,7 @@ def _track(name, ch, program, pan, seq, extra=()):
     return tr
 
 
-def arrange(in_path, out_stem, ensemble, plan=None, legato=False, mono=False, dyn=False):
+def arrange(in_path, out_stem, ensemble, plan=None, legato=False, mono=False, dyn=False, bass=False):
     """Пишет <out_stem>.mid и возвращает отчёт (словарь). ensemble — ключ из ENSEMBLES.
     plan — проверенный план модели (кто ведёт мелодию по фразам, где legato) или None: тогда как в версии 1.
     legato=True — связная игра во всей пьесе (без плана) или там, где так решил план.
@@ -684,7 +686,7 @@ def arrange(in_path, out_stem, ensemble, plan=None, legato=False, mono=False, dy
         parts, piano, stat = with_piano(notes, voices, mel, tpb, lead_name, mono)
     else:
         sh = melody_shift(notes, mel, INSTR[voices[0]][2])
-        parts, stat = distribute(notes, voices, mel, tpb, sh, (lambda t: voices.index(lead_name(t))) if lead_name else None)
+        parts, stat = distribute(notes, voices, mel, tpb, sh, (lambda t: voices.index(lead_name(t))) if lead_name else None, bass)
         stat["melody_shift"] = sh
         piano = None
     piano_mel = stat.pop("_piano_mel", set())
@@ -784,4 +786,4 @@ if __name__ == "__main__":
     else:                                        # ... пьеса.mid выход состав [--legato] [--plan план.json]
         import json
         _plan = json.load(open(sys.argv[sys.argv.index("--plan") + 1], encoding="utf-8")) if "--plan" in sys.argv else None
-        print(text(arrange(sys.argv[1], sys.argv[2], sys.argv[3], plan=_plan, legato="--legato" in sys.argv, mono="--mono" in sys.argv, dyn="--dyn" in sys.argv)))
+        print(text(arrange(sys.argv[1], sys.argv[2], sys.argv[3], plan=_plan, legato="--legato" in sys.argv, mono="--mono" in sys.argv, dyn="--dyn" in sys.argv, bass="--bass" in sys.argv)))
