@@ -44,18 +44,21 @@ req = st.text_area("Что сочинить", key="gen_req", height=220,
                                "или по шаблону: [Паспорт], разделы с тактами и аккордами, [Запреты]")
 TPL = composer.template_params(req)
 if TPL:
-    st.caption("Шаблон узнан: %s. Поля ниже не нужны — берётся то, что в [Паспорт]." % ", ".join(
+    st.caption("Шаблон узнан: %s. Берётся то, что в [Паспорт]." % ", ".join(
         x for x in ("%d тактов" % TPL["bars"] if TPL.get("bars") else "", TPL.get("key") or "",
                     "размер " + TPL["time"] if TPL.get("time") else "",
-                    "темп %d" % TPL["tempo"] if TPL.get("tempo") else "") if x))
-c1, c2 = st.columns(2)
-with c1:
-    bars = st.selectbox("Длина (тактов)", [8, 16, 24, 32], index=1, key="gen_bars")
-    meter = st.selectbox("Размер", [AUTO, "4/4", "3/4", "6/8", "2/4"], key="gen_meter")
-with c2:
-    key = st.text_input("Тональность", key="gen_key", placeholder=AUTO,
-                        help="Например: ре мажор, ля минор, Bb major. Пусто — выберет модель по описанию.")
-    tempo = st.selectbox("Темп (четвертей в минуту)", [AUTO, 60, 72, 84, 96, 108, 120, 138], key="gen_tempo")
+                    "темп %d" % TPL["tempo"] if TPL.get("tempo") else "") if x) +
+               " Поля длины, размера, тональности и темпа скрыты: при шаблоне они не нужны.")
+bars, meter, key, tempo = 16, AUTO, "", AUTO
+if not TPL:     # при шаблоне поля скрыты: всё берётся из [Паспорт]
+    c1, c2 = st.columns(2)
+    with c1:
+        bars = st.selectbox("Длина (тактов)", [8, 16, 24, 32], index=1, key="gen_bars")
+        meter = st.selectbox("Размер", [AUTO, "4/4", "3/4", "6/8", "2/4"], key="gen_meter")
+    with c2:
+        key = st.text_input("Тональность", key="gen_key", placeholder=AUTO,
+                            help="Например: ре мажор, ля минор, Bb major. Пусто — выберет модель по описанию.")
+        tempo = st.selectbox("Темп (четвертей в минуту)", [AUTO, 60, 72, 84, 96, 108, 120, 138], key="gen_tempo")
 
 
 def _compose(variant):
