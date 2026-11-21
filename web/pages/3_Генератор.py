@@ -33,8 +33,21 @@ if not READY:
     st.warning("Модель не настроена: в Secrets нужны PLANNER_PROVIDER, PLANNER_MODEL и ключ. Без неё генератор не работает.")
 
 st.markdown(common.theme.SECTION("I", "Опишите пьесу"), unsafe_allow_html=True)
-req = st.text_area("Что сочинить", key="gen_req", height=110,
-                   placeholder="Например: нежный вальс в духе Шопена, ля минор, для флейты с оркестром")
+def _put_template():
+    st.session_state["gen_req"] = composer.TEMPLATE
+
+
+st.button("📋 Вставить пример шаблона", on_click=_put_template, key="gen_tpl",
+          help="Шаблон с паспортом, разделами по тактам, аккордами и запретами. Замените своё и сочиняйте.")
+req = st.text_area("Что сочинить", key="gen_req", height=220,
+                   placeholder="Коротко («нежный вальс в духе Шопена, ля минор, для флейты с оркестром») "
+                               "или по шаблону: [Паспорт], разделы с тактами и аккордами, [Запреты]")
+TPL = composer.template_params(req)
+if TPL:
+    st.caption("Шаблон узнан: %s. Поля ниже не нужны — берётся то, что в [Паспорт]." % ", ".join(
+        x for x in ("%d тактов" % TPL["bars"] if TPL.get("bars") else "", TPL.get("key") or "",
+                    "размер " + TPL["time"] if TPL.get("time") else "",
+                    "темп %d" % TPL["tempo"] if TPL.get("tempo") else "") if x))
 c1, c2 = st.columns(2)
 with c1:
     bars = st.selectbox("Длина (тактов)", [8, 16, 24, 32], index=1, key="gen_bars")
@@ -48,9 +61,13 @@ with c2:
 def _compose(variant):
     with st.spinner("Модель сочиняет (обычно 20–60 секунд)..."):
         try:
-            r = composer.compose(req, bars=bars, key=key.strip() or None,
-                                 time_sig=None if meter == AUTO else meter,
-                                 tempo=None if tempo == AUTO else int(tempo), variant=variant)
+            if TPL:     # шаблон: тактов, тональность, размер и темп — из [Паспорт]
+                r = composer.compose(req, bars=TPL.get("bars") or bars, key=TPL.get("key"), time_sig=TPL.get("time"),
+                                     tempo=TPL.get("tempo"), variant=variant)
+            else:
+                r = composer.compose(req, bars=bars, key=key.strip() or None,
+                                     time_sig=None if meter == AUTO else meter,
+                                     tempo=None if tempo == AUTO else int(tempo), variant=variant)
             try:
                 r["mp3"] = open(audio_tools.render_mp3(r["midi"], os.path.splitext(r["midi"])[0] + ".mp3"), "rb").read()
             except Exception:

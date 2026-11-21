@@ -855,6 +855,8 @@ try:
     ok = ok and composer.parallels(_pm) == [(1, 2, "октавы")] and composer.parallels(_r["midi"]) == []
     _mi, _ = composer.to_midi({"time": "3/4", "bars": [{"rh": [["A4", 1], ["B4", 1], ["C5", 1]], "lh": [["A2", 3]]}] * 8}, _pm + "2.mid")
     ok = ok and any("Ритм" in x for x in composer.check(_mi, [], _pm + "2.mid", 8)[0])     # однообразный ритм (12.83)
+    ok = ok and composer.template_params(composer.TEMPLATE) == {"bars": 32, "key": "ре минор", "time": "3/4", "tempo": 66} \
+        and composer.template_params("вальс") == {}      # шаблон запроса (12.84)
     print("%-30s %s  запросов %d, тактов %d, гамма %.0f%%" % ("генератор пьес", "OK " if ok else "FAIL", len(_calls),
           _r["info"]["bars"], 100 * (_r["info"]["scale_share"] or 0)))
     failed += 0 if ok else 1

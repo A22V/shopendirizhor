@@ -55,7 +55,15 @@ Rules:
 5. Harmony: stay in the key with clear functional harmony (I, IV, V, ii, vi, secondary dominants allowed); modulate only
    if asked; avoid parallel fifths and octaves between melody and bass.
 6. "dyn" per bar: pp, p, mp, mf, f or ff, following the shape of the music. Use "pedal": "bar" for lyrical pieces.
-7. Write exactly the requested number of bars. No text outside the JSON."""
+7. Write exactly the requested number of bars. No text outside the JSON.
+8. If the request is a structured template ([Паспорт], sections with bar numbers, chords, [Запреты]), follow it EXACTLY:
+   key, time, tempo and length from [Паспорт]; each section in exactly its bars; the given chords in the given bars
+   (chord symbols like Dm, A7, Gm/Bb, Cmaj7, E7sus4; "|" separates groups of bars, chords are spread evenly over the
+   section's bars unless bar numbers are given); dynamics and tempo changes per section (write ritardando as longer
+   notes and rests, the tempo itself stays fixed); obey every line of [Запреты]. Use the motif from [Зерно].
+   Lines of lyrics inside a section are NOT sung: use their syllables and word stresses as a rhythm guide for the melody
+   (about one note per syllable, stressed syllables on strong beats or longer notes).
+   Instrument, voice and sound-design words describe the mood only: you still write for solo piano."""
 
 
 def _pitch(name):
@@ -294,11 +302,13 @@ def user_text(request, bars, key, time_sig, tempo, variant):
 
 
 def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, provider=None, model=None,
-            api_key=None, call=llm_planner.call_model, out_dir=None):
+            api_key=None, call=None, out_dir=None):
     """Сочинить пьесу. Возвращает словарь: midi (путь), piece (JSON), info, fixes, serious, minor, rounds (что
     отвечала модель), served (имя модели из ответа сервиса). Исключение — если ни одна попытка не дала нот."""
     if not (provider and api_key and model):
         provider, api_key, model = llm_planner.configured_provider()
+    if call is None:      # длинная пьеса пишется дольше плана оркестровки: ждём до 4 минут
+        call = lambda p, m, k, sy, us: llm_planner.call_model(p, m, k, sy, us, timeout=240)   # noqa: E731
     if not (provider and api_key and model):
         raise RuntimeError("модель не настроена: в Secrets нужны PLANNER_PROVIDER, PLANNER_MODEL и ключ")
     out_dir = out_dir or tempfile.mkdtemp(prefix="compose_")
@@ -359,3 +369,73 @@ def suggest_target(request):
                 continue
             return mode, what
     return "piano", None
+
+
+# ---------------- шаблон запроса (2026-11-21): структура по образцу промтов Suno, но для нот ----------------
+TEMPLATE = """[Паспорт]
+Жанр и ориентир: русский романс-элегия, в духе Глинки и раннего Рахманинова
+Тональность: ре минор
+Размер: 3/4
+Темп: 66, свободно, с дыханием в концах фраз
+Длина: 32 такта
+Характер: одиночество, тихая жалоба, в середине надежда, в конце смирение
+
+[Зерно — главный мотив]
+Три ноты: ля – си-бемоль – ля (вздох вниз), ритм «четверть с точкой, восьмая, четверть».
+Мотив повторяется на разной высоте, но не дважды одинаково подряд.
+
+[A — Жалоба, такты 1–8]
+Динамика: pp
+Гармония: Dm – Gm/Bb – A7 – Dm | Dm – Bb – Gm6 – A7 (полукаденция в такте 8)
+Мелодия: средний регистр (ре первой – ре второй октавы), в основном шагами, вершина в такте 6
+Левая рука: бас на первую долю, тихий аккорд на вторую и третью
+
+[A' — Повтор с дыханием, такты 9–16]
+Динамика: p → mp
+Гармония: как в A, в такте 14 отклонение в фа мажор (C7 – F), возврат Gm – A7 – Dm
+Мелодия: тот же мотив, вершина выше (фа второй октавы)
+Левая рука: разложенные аккорды восьмыми
+
+[B — Надежда, такты 17–24]
+Динамика: mf, крещендо к такту 22
+Гармония: F – C/E – Dm – Bb | Gm – C7 – F, затем E7 – A7
+Мелодия: новая, светлая, шире; синкопы в тактах 19 и 21; кульминация в такте 22 (ля второй октавы)
+Левая рука: подголосок восьмыми в среднем голосе
+
+[A'' — Возвращение и смирение, такты 25–32]
+Динамика: mp → pp, замедление в последних двух тактах
+Гармония: Dm – Gm – Dm/A – A7 | Dm – Bb – A7 – Dm (полная каденция)
+Мелодия: мотив из A, ниже и короче; последняя нота — ре первой октавы на весь такт
+Левая рука: бас и тянущиеся аккорды, всё реже
+
+[Запреты]
+Без параллельных октав и квинт между мелодией и басом.
+Без одинакового ритма больше двух тактов подряд.
+Без скачков мелодии больше октавы.
+Не больше 4 нот в руке.
+Без джазовых аккордов и без модуляций дальше фа мажора."""
+
+
+def template_params(text):
+    """Из [Паспорт] шаблона: число тактов, тональность, размер, темп (None — не указано). Если [Паспорт] нет — {}."""
+    t = text or ""
+    if "[паспорт]" not in t.lower():
+        return {}
+    out = {}
+    m = re.search(r"Длина\s*:\s*(\d+)", t, re.I)
+    if m:
+        out["bars"] = int(m.group(1))
+    else:      # по последнему такту разделов «такты 25–32»
+        ends = [int(x) for x in re.findall(r"такт\w*\s+\d+\s*[–—-]\s*(\d+)", t, re.I)]
+        if ends:
+            out["bars"] = max(ends)
+    m = re.search(r"Тональность\s*:\s*([^\n]+)", t, re.I)
+    if m and _key(m.group(1).strip()):
+        out["key"] = m.group(1).strip()
+    m = re.search(r"Размер\s*:\s*(\d+\s*/\s*\d+)", t, re.I)
+    if m:
+        out["time"] = m.group(1).replace(" ", "")
+    m = re.search(r"Темп\s*:\s*(\d+)", t, re.I)
+    if m:
+        out["tempo"] = int(m.group(1))
+    return out
