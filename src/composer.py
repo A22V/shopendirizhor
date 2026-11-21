@@ -19,6 +19,8 @@ import mido
 
 import llm_planner
 
+MAX_TOKENS = 48000      # лимит ответа модели для пьесы (Haiku 5.5 допускает до 128k; платится только использованное)
+_LOW_EFFORT = [False]
 CONT_MAX = 4           # дописываний оборванной пьесы (каждое — платный запрос, у Haiku доли цента)
 MAX_ROUNDS = 2          # запросов к модели на одну пьесу (второй — только если первая попытка с серьёзными замечаниями)
 TPB = 480
@@ -395,13 +397,18 @@ def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, pr
     if not (provider and api_key and model):
         provider, api_key, model = llm_planner.configured_provider()
     if call is None:      # длинная пьеса пишется дольше плана оркестровки: ждём до 4 минут
-        call = lambda p, m, k, sy, us: llm_planner.call_model(p, m, k, sy, us, timeout=240)   # noqa: E731
+        # пьеса длиннее плана оркестровки, а размышления модели входят в лимит ответа (12.89): лимит 48000, ждём до 10 мин;
+        # если ответ всё же пуст по лимиту — следующие запросы с меньшими размышлениями (effort low)
+        call = lambda p, m, k, sy, us: llm_planner.call_model(   # noqa: E731
+            p, m, k, sy, us, timeout=600, max_tokens=MAX_TOKENS,
+            extra={"output_config": {"effort": "low"}} if _LOW_EFFORT[0] and p == "claude" else None)
     if not (provider and api_key and model):
         raise RuntimeError("модель не настроена: в Secrets нужны PLANNER_PROVIDER, PLANNER_MODEL и ключ")
     out_dir = out_dir or tempfile.mkdtemp(prefix="compose_")
     user = user_text(request, bars, key, time_sig, tempo, variant)
     rounds, best = [], None
     llm_planner.MODELS_SERVED.clear()
+    _LOW_EFFORT[0] = False
     for r in range(MAX_ROUNDS):
         text = call(provider, model, api_key, SYSTEM, user)
         rec = {"round": r + 1}
@@ -429,6 +436,9 @@ def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, pr
             if best is None or len(serious) < len(best["serious"]):
                 best = cand
         except Exception as e:
+            if not (text or "").strip() and llm_planner.LAST_STOP[0] in ("max_tokens", "length"):
+                _LOW_EFFORT[0] = True        # модель истратила лимит на размышления: дальше размышлять меньше
+                rec["low_effort_next"] = True
             rec.update(ok=False, error="%s: %s (длина ответа %d знаков, причина конца: %s; конец ответа: …%s)" % (
                 type(e).__name__, e, len(text or ""), llm_planner.LAST_STOP[0], (text or "")[-120:].replace("\n", " ")),
                 answer=text[:600])

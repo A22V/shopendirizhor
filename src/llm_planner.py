@@ -33,8 +33,10 @@ STRICT = os.environ.get("LLM_STRICT") == "1"
 TEMPERATURE = 0.0 if STRICT else 0.3
 
 
-def build_request(provider, model, api_key, system, user):
-    """Return (url, headers, body_bytes) for the provider. No network call here."""
+def build_request(provider, model, api_key, system, user, max_tokens=16000, extra=None):
+    """Return (url, headers, body_bytes) for the provider. No network call here.
+    max_tokens / extra — только для Claude: у новых моделей (Haiku 5.5 и др.) скрытые размышления включены по умолчанию
+    и входят в max_tokens; extra, например {"output_config": {"effort": "low"}}, уменьшает размышления (2026-11-22)."""
     if provider in ("deepseek", "gpt"):
         url = ENDPOINTS[provider]
         headers = {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}
@@ -45,8 +47,9 @@ def build_request(provider, model, api_key, system, user):
         url = ENDPOINTS[provider]
         headers = {"Content-Type": "application/json", "x-api-key": api_key,
                    "anthropic-version": "2023-06-01"}
-        body = {"model": model, "max_tokens": 16000, "system": system,  # 16000: длинная пьеса генератора (48 тактов JSON) больше 8000 токенов
+        body = {"model": model, "max_tokens": max_tokens, "system": system,
                 "messages": [{"role": "user", "content": user}]}
+        body.update(extra or {})
     elif provider == "gemini":
         url = ENDPOINTS[provider].format(model=model) + "?key=" + api_key
         headers = {"Content-Type": "application/json"}
@@ -72,8 +75,8 @@ LAST_STOP = [None]   # почему модель закончила ответ (
 MODELS_SERVED = []   # какое имя модели вернул сам сервис в ответе (проверка, что работает именно выбранная модель)
 
 
-def call_model(provider, model, api_key, system, user, timeout=120):
-    url, headers, body = build_request(provider, model, api_key, system, user)
+def call_model(provider, model, api_key, system, user, timeout=120, max_tokens=16000, extra=None):
+    url, headers, body = build_request(provider, model, api_key, system, user, max_tokens, extra)
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
