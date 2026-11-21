@@ -301,6 +301,36 @@ def user_text(request, bars, key, time_sig, tempo, variant):
     return "\n".join(parts)
 
 
+def parse_piece(text):
+    """JSON пьесы из ответа модели. Сначала как есть (llm_planner.parse_plan); если не читается — чиним частые
+    опечатки моделей: дроби длительностей (1/3, 2/3 у триолей), комментарии //, запятые перед ] и }, «умные» кавычки.
+    Возвращает (piece, [что починено])."""
+    try:
+        return llm_planner.parse_plan(text), []
+    except Exception as first:
+        m = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.S)
+        raw = m.group(1) if m else text[text.find("{"): text.rfind("}") + 1]
+        fixed, notes = raw, []
+        new = re.sub(r'(?<!["\w.])(\d+)\s*/\s*(\d+)(?![\w"])',
+                     lambda g: repr(round(int(g.group(1)) / int(g.group(2)), 4)) if int(g.group(2)) else g.group(0), fixed)
+        if new != fixed:
+            fixed, notes = new, notes + ["дроби длительностей (например 1/3) заменены числами"]
+        new = re.sub(r'(?m)\s*//[^\n"]*$', "", fixed)
+        if new != fixed:
+            fixed, notes = new, notes + ["убраны комментарии //"]
+        new = re.sub(r",\s*([\]}])", r"\1", fixed)
+        if new != fixed:
+            fixed, notes = new, notes + ["убраны лишние запятые"]
+        new = fixed.replace("\u201c", '"').replace("\u201d", '"')
+        if new != fixed:
+            fixed, notes = new, notes + ["заменены типографские кавычки"]
+        try:
+            return json.loads(fixed), notes
+        except json.JSONDecodeError as e:
+            a = max(0, e.pos - 60)
+            raise ValueError("%s; место ошибки: …%s…" % (first, fixed[a:e.pos + 40].replace("\n", " "))) from None
+
+
 def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, provider=None, model=None,
             api_key=None, call=None, out_dir=None):
     """Сочинить пьесу. Возвращает словарь: midi (путь), piece (JSON), info, fixes, serious, minor, rounds (что
@@ -319,9 +349,10 @@ def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, pr
         text = call(provider, model, api_key, SYSTEM, user)
         rec = {"round": r + 1}
         try:
-            piece = llm_planner.parse_plan(text)
+            piece, repaired = parse_piece(text)
             path = os.path.join(out_dir, "piece_%d.mid" % (r + 1))
             info, fixes = to_midi(piece, path)
+            fixes = ["в ответе модели: " + x for x in repaired] + fixes
             serious, minor = check(info, fixes, path, bars)
             rec.update(ok=True, serious=serious, minor=minor)
             cand = {"midi": path, "piece": piece, "info": info, "fixes": fixes, "serious": serious, "minor": minor}
@@ -329,7 +360,8 @@ def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, pr
                 best = cand
         except Exception as e:
             rec.update(ok=False, error="%s: %s" % (type(e).__name__, e), answer=text[:600])
-            serious = ["Ответ не удалось прочитать как JSON пьесы (%s). Пришлите только JSON по формату." % type(e).__name__]
+            serious = ["Your answer is not valid JSON (%s). Send ONLY the JSON object; durations as decimal numbers "
+                       "(0.333 for a triplet eighth, never 1/3); no comments." % e]
         rounds.append(rec)
         if best is not None and not best["serious"]:
             break
