@@ -198,11 +198,12 @@ try:
     ok = ok and 'accept=' not in _ph                       # без фильтра: на Android фильтр делает файлы серыми
     _pp = open(os.path.join(ROOT, "web", "picker.py"), encoding="utf-8").read()
     ok = ok and "declare_component" in _pp and "b64decode" in _pp
-    _app = open(os.path.join(ROOT, "web", "app.py"), encoding="utf-8").read()
+    _app = open(os.path.join(ROOT, "web", "app.py"), encoding="utf-8").read() + \
+        open(os.path.join(ROOT, "web", "common.py"), encoding="utf-8").read()     # приём файла вынесен в common.py
     _pl = open(os.path.join(ROOT, "web", "pages", "1_Проигрыватель.py"), encoding="utf-8").read()
     ok = ok and "picker.pick" in _app and "picker.pick" in _pl
     ok = ok and "ack" in _ph and "CHUNK" in _ph and "WAIT_MS" in _ph         # части, подтверждение, повтор
-    ok = ok and "picker.diagnostics()" in _app and "picker.diagnostics()" in _pl
+    ok = ok and "picker.diagnostics(" in _app and "picker.diagnostics()" in _pl
     print("%-30s %s" % ("своя кнопка выбора файла", "OK " if ok else "FAIL"))
     failed += 0 if ok else 1
 except Exception:

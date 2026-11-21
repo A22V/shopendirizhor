@@ -2,18 +2,15 @@
 Оркестратор (репозиторий shopendirizhor): веб-оболочка (Streamlit).
 Запуск локально:  streamlit run web/app.py
 Размещение в облаке: см. docs/DEPLOY.md
+Главная страница (упрощена 2026-11-21): загрузка, выбор, результат. Все проверки, карта замечаний, ноты с
+пометками и исправления — на странице «Анализ и проверки» (web/pages/2_Анализ.py, показ: web/analysis_ui.py).
 """
 import os, sys, io, json, tempfile, zipfile, shutil, traceback, time
 import streamlit as st
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, "src"))
-try:
-    for _k, _v in st.secrets.items():          # keys from Streamlit "Secrets" become environment variables
-        if isinstance(_v, str):                 # (before the imports below: ORCH_RANGES / ORCH_COMFORT are read at import)
-            os.environ.setdefault(_k, _v)
-except Exception:
-    pass
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common                # noqa: E402  первым: секреты Streamlit → переменные окружения до импорта src
+from common import ROOT, checked_midi, any_file   # noqa: E402,F401
 
 import orchestrator          # noqa: E402
 import validator             # noqa: E402
@@ -21,124 +18,43 @@ import audio_tools           # noqa: E402
 import llm_planner           # noqa: E402
 import reduction             # noqa: E402
 import score_review          # noqa: E402
-import score_fix             # noqa: E402
 import quality_gate          # noqa: E402
 import taste_check           # noqa: E402
 import score_notation        # noqa: E402
-import piano_review          # noqa: E402
 import resources             # noqa: E402
-import midi_repair           # noqa: E402
-import score_player          # noqa: E402
+import theme                 # noqa: E402
+import progress              # noqa: E402
+import jobs                  # noqa: E402
+import picker                # noqa: E402
+import analysis_ui           # noqa: E402
 PROVIDER, PROVIDER_KEY, PROVIDER_MODEL = llm_planner.configured_provider()
 LLM_READY = bool(PROVIDER and PROVIDER_KEY and PROVIDER_MODEL)
 
 st.set_page_config(page_title="Оркестратор", page_icon="🎼", layout="centered")
+common.decorate()
+common.nav("Главная")
 
-# Барочное оформление (вариант A: голубой дворец, золото, красный бархат): web/theme.py.
-# Украшения только в шапке, по краям и в углах листа; текст всегда на сплошном светлом листе.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import theme                 # noqa: E402
-import progress
-import jobs              # noqa: E402
-import picker            # noqa: E402  своя кнопка выбора файла (веб-сокет вместо канала загрузки)
-st.markdown(theme.CSS(), unsafe_allow_html=True)
-_first_visit = not st.session_state.get("bq_opened")     # занавес раздвигается только при первом входе
-st.session_state["bq_opened"] = True
-st.markdown(theme.DECOR_TOP(curtain_open=_first_visit), unsafe_allow_html=True)
-st.markdown(theme.TITLE(), unsafe_allow_html=True)
-_wall = st.radio("Стена", ["глубокая", "светлая"], horizontal=True, key="wall")
-st.markdown("<style>" + theme.WALL_CSS("deep" if _wall == "глубокая" else "light") + "</style>", unsafe_allow_html=True)
-
-st.markdown("""<div class='frame'>
-<b>Оркестровка.</b> Загрузите сольную фортепианную пьесу в формате MIDI. Программа разберёт её на фразы и распределит по инструментам камерного состава: флейта, гобой, кларнет, фагот, валторна, скрипки, альт, виолончель, контрабас. На выходе: MIDI с дорожкой на каждый инструмент, нотный файл MusicXML и запись для прослушивания.<br><br>
-<b>Переложение для фортепиано.</b> Загрузите оркестровую пьесу в формате MIDI. Программа сведёт все голоса к фортепиано: правая и левая руки, ограниченное число нот в аккорде. На выходе: фортепианный MIDI и запись для прослушивания.
-</div>""", unsafe_allow_html=True)
-
-st.markdown("""<div class='frame warn'>
-<b>Честно о результате.</b> Оркестровка строится по правилам, которые взяты из книги Римского-Корсакова
-и дополнены эвристиками. Она проверяется автоматически, но <i>не является профессиональной аранжировкой</i>.
-Звук в записи для прослушивания синтезированный и проще живого оркестра. Пожалуйста, оценивайте результат как прототип.
-</div>""", unsafe_allow_html=True)
-
-with st.expander("Ограничения и приватность", expanded=False):
+with st.expander("О программе, ограничения и приватность", expanded=False):
     st.markdown("""
-- Загружайте только свои пьесы или пьесы, права на которые у вас есть. Загруженный файл и результат оркестровки хранятся на сервере не дольше 6 часов (чтобы результат не терялся, если на телефоне погас экран), потом удаляются.
-- Размер файла: MIDI до 2 МБ (около 2000 нот), MusicXML до 5 МБ. Подпись «5MB per file» под кнопкой загрузки — встроенная надпись Streamlit (по-английски), это общий предел для любого файла.
-- Программа не умеет превращать запись живой игры (mp3/wav) в MIDI: нужен MIDI с ровным, квантованным ритмом.
+**Оркестровка:** фортепианная пьеса (MIDI или MusicXML) → камерный оркестр из десяти инструментов (флейта, гобой, кларнет,
+фагот, валторна, скрипки I и II, альт, виолончель, контрабас). **Ансамбль:** дуэт, трио или квартет. **Переложение:**
+оркестр → фортепиано. На выходе MIDI по дорожкам, ноты MusicXML и запись для прослушивания.
+
+**Честно о результате.** Правила взяты из учебников (Римский-Корсаков, Берлиоз, Форсайт, Черни) и дополнены эвристиками.
+Результат проверяется автоматически, но это не профессиональная аранжировка, а звук синтезированный. Что именно нашла
+проверка — на странице «Анализ и проверки».
+
+- Загружайте только свои пьесы или пьесы, права на которые у вас есть. Файл и результат хранятся на сервере не дольше 6 часов, потом удаляются.
+- Размер: MIDI до 2 МБ (около 2000 нот), MusicXML до 5 МБ.
+- Запись живой игры (mp3/wav) программа в MIDI не превращает.
 - Пьесы короче 3 тактов и длиннее 100 тактов дают неудовлетворительный результат.
 """)
 
 if "result" not in st.session_state:
     st.session_state.result = None
 
-st.markdown("🎼 Есть готовая партитура (MIDI или MusicXML)? [**Партитурный проигрыватель** (новая вкладка)](Проигрыватель): "
-            "каждый инструмент на своей нотной строке, звук банком MuseScore, можно выключать инструменты.")
-st.page_link("pages/1_Проигрыватель.py", label="Открыть здесь", icon="🎼")
-
 st.markdown(theme.SECTION("I", "Загрузите пьесу"), unsafe_allow_html=True)
-# Без фильтра type: на планшетах (iPad, Android) браузер с фильтром ".mid" часто делает MIDI-файлы серыми
-# и их нельзя выбрать. Расширение проверяем сами.
-class _Upload:
-    """Проверенный MIDI: имя всегда с .mid, содержимое — чистый MIDI (как у объекта загрузки Streamlit)."""
-    def __init__(self, name, data):
-        self.name, self._data, self.size = name, data, len(data)
-
-    def getvalue(self):
-        return self._data
-
-
-MIDI_EXTS = (".mid", ".midi", ".kar", ".rmi", ".smf", ".bin", ".dat", ".tmp", ".musicxml", ".xml", ".mxl", ".zip")
-
-
-def midi_bytes(data: bytes):
-    """Содержимое MIDI или None. MIDI узнаём по признаку «MThd» внутри файла, а не по имени: телефон (Telegram,
-    WhatsApp, Google Диск, «Загрузки» на Android) часто отдаёт файл без окончания .mid или с другим окончанием.
-    RIFF-MIDI (.rmi) и файлы с небольшим служебным заголовком перед MIDI тоже принимаются."""
-    if data[:4] == b"MThd":
-        return data
-    i = data.find(b"MThd", 0, 512)
-    if i > 0 and (data[:4] == b"RIFF" or i <= 256):
-        return data[i:]
-    return None
-
-
-def checked_midi(f, what="Файл"):
-    """Принятый MIDI или None. С 2026-11-08 каждый файл проходит ремонт (src/midi_repair.py): нестандартные и
-    повреждённые MIDI с сайтов и из мессенджеров переписываются в чистый стандартный MIDI; ноты не меняются."""
-    if f is None:
-        return None
-    name = f.name or "пьеса"
-    try:
-        midi, fixes = midi_repair.repair(f.getvalue(), name)
-    except midi_repair.MidiRepairError as e:
-        st.error("%s «%s» не открылся: %s." % (what, name, e))
-        return None
-    except Exception as e:                 # неожиданное: показываем причину, а не молчим
-        st.error("%s «%s» не открылся из-за ошибки программы: %s: %s. Пришлите файл разработчику."
-                 % (what, name, type(e).__name__, e))
-        return None
-    stem, ext = os.path.splitext(name)
-    if ext.lower() not in MIDI_EXTS:
-        stem = name                    # «Прелюдия» или «document_1234»: окончания нет, имя оставляем целиком
-    if fixes:
-        st.caption("✔ " + midi_repair.text(fixes))
-    elif not name.lower().endswith((".mid", ".midi")):
-        st.caption("Имя «%s» без окончания .mid, но внутри MIDI: файл принят." % name)
-    return _Upload(stem + ".mid", midi)
-
-
-def any_file(label, key):
-    """Файл из своей кнопки (основной путь) или из штатной загрузки Streamlit (запасной путь)."""
-    key = "%s_%d" % (key, st.session_state.get("reset_n", 0))      # после «Начать заново» кнопки создаются заново, пустыми
-    f = picker.pick(label, key)
-    with st.expander("Запасная кнопка загрузки (если основная не сработала)"):
-        g = st.file_uploader("Обычная загрузка Streamlit", accept_multiple_files=False, key=key + "_native")
-    return f or g
-
-
-up = checked_midi(any_file("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ", "piece"))
-picker.diagnostics()
-
+up = checked_midi(any_file("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ", "piece", diagnostics=True))
 
 def reset_all():
     """«Начать заново»: забыть файлы, результат и настройки этой сессии, стереть её задание на сервере."""
@@ -162,7 +78,7 @@ def reset_all():
     st.rerun()
 
 
-if st.button("🧹 Начать заново (стереть файлы и результат)", help="Забывает загруженные файлы, результат и настройки; "
+if st.button("🧹 Начать заново", help="Забывает загруженные файлы, результат и настройки; "
              "с сервера стирается ваша оркестровка. Исходные файлы на вашем телефоне или компьютере не трогаются."):
     reset_all()
 
@@ -195,7 +111,7 @@ def source_mp3(data: bytes):
 
 
 if up is not None and up.size <= 2 * 1024 * 1024:
-    st.markdown("**Исходный файл:** так звучит загруженный MIDI до обработки.")
+    st.caption("Исходный файл, как он звучит до обработки:")
     with st.spinner("Готовлю запись исходного файла..."):
         _src = source_mp3(up.getvalue())
     if _src["mp3"]:
@@ -229,67 +145,67 @@ def plan_task_text(data: bytes) -> str:
             "ПРАВИЛА:\n" + llm_planner.system_text() + "\n\nОПИСАНИЕ ПЬЕСЫ (%d тактов; фразы должны покрыть все такты 1..%d без дыр):\n"
             % (n, n) + desc + "\n")
 
-
 st.markdown(theme.SECTION("II", "Что сделать"), unsafe_allow_html=True)
-use_llm = False
-if LLM_READY:
-    use_llm = st.checkbox("Помощь модели (%s): план оркестровки или выбор голосов при переложении" % PROVIDER, value=True,
-                          help="Модель пишет план по смыслу фраз, программа проверяет его.")
-REVIEW_MODE = "Проверить партитуру (готовый оркестр)"
-PIANO_REVIEW_MODE = "Проверить переложение (готовое фортепиано)"
+ORCH_MODE = "Оркестровка (из фортепиано)"
 ENSEMBLE_MODE = "Ансамбль: дуэт, трио, квартет (из фортепиано)"
-mode = st.radio("Что сделать", ["Оркестровка (из фортепиано)", ENSEMBLE_MODE, "Переложение для фортепиано (из оркестра)", REVIEW_MODE,
-                                PIANO_REVIEW_MODE], key="mode_pick")
+REDUCE_MODE = "Переложение для фортепиано (из оркестра)"
+mode = st.radio("Что сделать", [ORCH_MODE, ENSEMBLE_MODE, REDUCE_MODE], key="mode_pick", label_visibility="collapsed")
+use_llm = False
+if LLM_READY and mode != ENSEMBLE_MODE:
+    use_llm = st.checkbox("Помощь модели (%s): %s" % (PROVIDER, "план оркестровки" if mode == ORCH_MODE else "выбор голосов"),
+                          value=True, help="Модель пишет план по смыслу фраз, программа проверяет его. Платный запрос.")
 ens_pick = None
 if mode == ENSEMBLE_MODE:
     import ensemble
     _grp = st.radio("Сколько исполнителей", ["Дуэт", "Трио", "Квартет"], horizontal=True, key="ens_group")
     _opts = {e["ru"]: k for k, e in ensemble.ENSEMBLES.items() if e["group"] == _grp}
     ens_pick = _opts[st.selectbox("Состав", list(_opts), key="ens_pick_" + _grp)]
-    st.caption("Откуда состав: %s. Каждую партию играет один исполнитель; в составах без фортепиано каждая нота пьесы "
-               "отдаётся одному инструменту (так делают мастера: замер по базе IRCAM)." % ensemble.ENSEMBLES[ens_pick]["source"])
-    ens_legato = st.checkbox("Связная игра (legato): каждый инструмент тянет ноту до своей следующей ноты", value=False,
-                             key="ens_legato",
-                             help="У рояля звук продлевает педаль, у смычка педали нет: без связывания между нотами "
-                                  "остаются паузы и звучит отрывисто. Высоты и начала нот не меняются. Для танцевальных, "
-                                  "отрывистых пьес лучше не включать.")
-    ens_mono = st.checkbox("Одноголосная мелодия: перебор аккорда не считать мелодией", value=False, key="ens_mono",
-                           help="У рояльных свитков и живых записей аккорд берётся чуть вразнобой, и программа принимала "
-                                "нижние звуки такого аккорда за мелодию: скрипка играла по 3–5 нот сразу. С галочкой у "
-                                "мелодии остаётся одна нота за раз (верхняя), остальные уходят в сопровождение.")
-    ens_dyn = st.checkbox("Мелодия громче сопровождения (если у файла плоская громкость)", value=False, key="ens_dyn",
-                          help="Если у всех нот файла одна и та же сила нажатия (так бывает у нотных редакторов), все партии "
-                               "играют одинаково громко и «перекрикивают» друг друга. С галочкой мелодия получает больше, "
-                               "сопровождение меньше, нижний голос ещё тише. У файлов с живой динамикой ничего не меняется.")
-    ens_llm = False
-    if LLM_READY:
-        ens_llm = st.checkbox("План от модели (%s): кто ведёт мелодию в каждой фразе и где играть связно" % PROVIDER,
-                              value=False, key="ens_llm",
-                              help="Платный запрос (обычно один). Модель получает указания, как поступают мастера, и "
-                                   "пишет план; ноты раздаёт программа и проверяет план. Если план не годится или "
-                                   "сервис не ответил, ансамбль делается без плана, причина будет показана.")
-    else:
-        st.caption("План от модели (DeepSeek) недоступен: в настройках сервера нет ключа.")
+    with st.expander("Дополнительные настройки ансамбля"):
+        st.caption("Откуда состав: %s." % ensemble.ENSEMBLES[ens_pick]["source"])
+        ens_legato = st.checkbox("Связная игра (legato): каждый инструмент тянет ноту до своей следующей ноты", value=False,
+                                 key="ens_legato",
+                                 help="У рояля звук продлевает педаль, у смычка педали нет: без связывания между нотами "
+                                      "остаются паузы и звучит отрывисто. Высоты и начала нот не меняются. Для танцевальных, "
+                                      "отрывистых пьес лучше не включать.")
+        ens_mono = st.checkbox("Одноголосная мелодия: перебор аккорда не считать мелодией", value=False, key="ens_mono",
+                               help="У рояльных свитков и живых записей аккорд берётся чуть вразнобой, и программа принимала "
+                                    "нижние звуки такого аккорда за мелодию: скрипка играла по 3–5 нот сразу. С галочкой у "
+                                    "мелодии остаётся одна нота за раз (верхняя), остальные уходят в сопровождение.")
+        ens_dyn = st.checkbox("Мелодия громче сопровождения (если у файла плоская громкость)", value=False, key="ens_dyn",
+                              help="Если у всех нот файла одна и та же сила нажатия (так бывает у нотных редакторов), все партии "
+                                   "играют одинаково громко и «перекрикивают» друг друга. С галочкой мелодия получает больше, "
+                                   "сопровождение меньше, нижний голос ещё тише. У файлов с живой динамикой ничего не меняется.")
+        ens_llm = False
+        if LLM_READY:
+            ens_llm = st.checkbox("План от модели (%s): кто ведёт мелодию в каждой фразе и где играть связно" % PROVIDER,
+                                  value=False, key="ens_llm",
+                                  help="Платный запрос (обычно один). Модель получает указания, как поступают мастера, и "
+                                       "пишет план; ноты раздаёт программа и проверяет план. Если план не годится или "
+                                       "сервис не ответил, ансамбль делается без плана, причина будет показана.")
+        else:
+            st.caption("План от модели (DeepSeek) недоступен: в настройках сервера нет ключа.")
 SOLO_OPTIONS = {"Фортепиано": "Piano", "Флейта (нежная, невысокая)": "Flute", "Кларнет": "Clarinet", "Гобой": "Oboe",
                 "Скрипка": "Violin I", "Виолончель": "Cello", "Аккордеон": "Accordion", "Орган": "Organ", "Гитара": "Guitar"}
 LEAD_MODES = ["Оркестр сам распределяет мелодию", "Один солист на всю пьесу", "Меняющиеся солисты, как в «Болеро»"]
 SOLO_NAMES = dict({v: k for k, v in SOLO_OPTIONS.items()}, Bolero="меняющиеся солисты, как в «Болеро»")
 solo = None
-if mode == "Оркестровка (из фортепиано)":
+perc = False
+plan_text = ""
+if mode == ORCH_MODE:
     _lead = st.radio("Кто ведёт мелодию", LEAD_MODES, key="lead_pick",
                      help="Один солист: как в концерте, один инструмент ведёт мелодию от начала до конца, остальные тихо "
                           "аккомпанируют. «Болеро»: солист меняется только между высказываниями темы (примерно через "
-                          "8 тактов), внутри высказывания мелодию ведёт один инструмент. Выбирается для каждой пьесы.")
+                          "8 тактов). Выбирается для каждой пьесы.")
     if _lead == LEAD_MODES[1]:
         solo = SOLO_OPTIONS[st.selectbox("Солирующий инструмент", list(SOLO_OPTIONS), key="solo_pick",
                                          help="Фортепиано и орган играют пьесу целиком, оркестр их поддерживает.")]
     elif _lead == LEAD_MODES[2]:
         solo = "Bolero"
-    perc = st.checkbox("Лёгкие ударные для ритма (как в эстрадно-симфоническом оркестре)", value=False, key="perc_pick",
-                       help="Тихая бочка, обод малого барабана и хай-хэт по размеру такта; громкость следует фразам. "
-                            "Ноты оркестра не меняются. Ударные есть в MIDI и MP3, в нотах их нет.")
-    plan_text = ""
-    with st.expander("План оркестровки от другой модели (Claude, ChatGPT и др.): скачать задание и вставить ответ"):
+    with st.expander("Дополнительные настройки: ударные, план от другой модели"):
+        perc = st.checkbox("Лёгкие ударные для ритма (как в эстрадно-симфоническом оркестре)", value=False, key="perc_pick",
+                           help="Тихая бочка, обод малого барабана и хай-хэт по размеру такта; громкость следует фразам. "
+                                "Ноты оркестра не меняются. Ударные есть в MIDI и MP3, в нотах их нет.")
+        st.markdown("**План оркестровки от другой модели** (Claude, ChatGPT и др.)")
         st.caption("Так можно не платить DeepSeek: скачайте задание, отдайте его любой модели (например, Claude), "
                    "а присланный ею план вставьте сюда. Программа проверит план и расставит по нему ноты. "
                    "Если окно пустое, работает обычный план.")
@@ -323,16 +239,7 @@ if mode == "Оркестровка (из фортепиано)":
             except Exception as _e:
                 st.error("Это не похоже на план (JSON): %s" % _e)
                 plan_text = ""
-else:
-    perc = False
-    plan_text = ""
-orig_up = None
-if mode == PIANO_REVIEW_MODE:
-    st.caption("Вверху загрузите MIDI рояля. По желанию добавьте оркестровый оригинал: тогда программа посчитает, "
-               "сколько гармонии оркестра сохранилось в переложении.")
-    orig_up = checked_midi(any_file("Оркестровый оригинал (необязательно, MIDI или MusicXML)", "orig_up"), "Оригинал")
-go = st.button({"Оркестровка (из фортепиано)": "Создать оркестровку", REVIEW_MODE: "Проверить партитуру",
-                PIANO_REVIEW_MODE: "Проверить переложение", ENSEMBLE_MODE: "Создать ансамбль"}.get(mode, "Создать переложение"),
+go = st.button({ORCH_MODE: "Создать оркестровку", ENSEMBLE_MODE: "Создать ансамбль"}.get(mode, "Создать переложение"),
                disabled=up is None, use_container_width=True)
 
 
@@ -430,197 +337,7 @@ def process(data: bytes, name: str, use_llm_flag: bool = False, prog=None, solo=
             "mp3": mp3, "name": os.path.splitext(name)[0], "review": review, "gate": gate}
 
 
-FIX_NO_AUTO = {   # замечания без автоисправления: почему (простыми словами)
-    "K1": "ноты вне удобного диапазона: исправлять надо выбором другого инструмента — это делает план, а не готовый файл",
-    "K3": "«стена звука» и скачки состава: прореживание включается до расстановки нот (ORCH_THIN), в готовом файле его нет",
-    "K5": "первая скрипка молчит: так бывает задумано (мелодия у других), решает слушатель",
-    "HM05": "параллельные октавы: нужна переделка голосов, автоматически пока не умеем",
-    "HM32": "параллельные квинты: нужна переделка голосов, автоматически пока не умеем",
-    "HM32P": "эти параллельные квинты есть в самих фортепианных нотах; программа их только перенесла, исправлять нечего",
-    "QX04": "длинные ноты духовых без передышки: решается в плане",
-    "QX05": "много унисонных удвоений: решается в плане",
-    "QX06": "инструмент не играет: в оркестровке это исправляют защиты плана (ORCH_BASS, ORCH_WINDS)",
-}
-
-
-def show_fix(res, src_midi, key):
-    """Раздел «Исправление»: для каждого замечания, у которого есть автоисправление, — кнопка. Каждая кнопка делает
-    НОВЫЙ файл (исходный не меняется) и даёт его послушать и скачать; рецензия пересчитывается."""
-    review = res.get("review") or {}
-    codes = [f[1] for f in review.get("findings", [])]
-    st.markdown(theme.SECTION("IV", "Исправление"), unsafe_allow_html=True)
-    if not codes:
-        st.caption("Замечаний нет — исправлять нечего.")
-        return
-    fixable = [c for c in score_fix.FIXES if c in codes]
-    st.caption("Каждая кнопка делает НОВЫЙ файл; ваш исходный остаётся как был. Сначала послушайте исправленный вариант, "
-               "потом решайте, какой оставить.")
-    if not fixable:
-        st.info("Для найденных замечаний автоматического исправления пока нет.")
-    for code in fixable:
-        label, fn, approved = score_fix.FIXES[code]
-        st.markdown("**[%s]** %s%s" % (code, label, "" if approved else " — не проверено на слух, это проба"))
-        if st.button("Исправить [%s]" % code, key="fix_%s_%s" % (key, code), use_container_width=True):
-            try:
-                base = os.path.splitext(src_midi)[0]
-                _fx = base + "_fix_%s.mid" % code
-                _chg = fn(src_midi, _fx)
-                _rv2 = score_review.review(_fx)
-                _mp3f = None
-                try:
-                    _mp3f = audio_tools.render_mp3(_fx, base + "_fix_%s.mp3" % code)
-                except Exception:
-                    _mp3f = None
-                res.setdefault("fixes", {})[code] = {
-                    "midi": _fx, "changes": _chg, "mp3": _mp3f if _mp3f and os.path.exists(_mp3f) else None,
-                    "before": len(review.get("findings", [])), "after": len(_rv2["findings"]),
-                    "left": [f[3] for f in _rv2["findings"] if f[1] == code]}
-                st.session_state.result = res
-            except Exception:
-                res.get("fixes", {}).pop(code, None)
-                st.error("Не удалось исправить файл. Исходный файл не изменён.")
-                with st.expander("Подробности для разработчика"):
-                    st.code(traceback.format_exc())
-        _fix = (res.get("fixes") or {}).get(code)
-        if _fix:
-            if _fix["changes"]:
-                st.success("Что изменено:")
-                for _c in _fix["changes"]:
-                    st.write("• " + _c)
-            else:
-                st.info("Исправлять нечего: подходящих мест не найдено.")
-            st.write("Замечаний рецензента: было %d, стало %d." % (_fix["before"], _fix["after"]))
-            for _l in _fix["left"]:
-                st.caption("Осталось: " + _l)
-            if _fix["mp3"]:
-                st.audio(_fix["mp3"])
-            with open(_fix["midi"], "rb") as _fh:
-                st.download_button("Скачать исправленный MIDI [%s]" % code, _fh.read(),
-                                   file_name=res["name"] + "_исправлено_%s.mid" % code, mime="audio/midi",
-                                   use_container_width=True, key="dl_fix_%s_%s" % (key, code))
-            if _fix["mp3"]:
-                with open(_fix["mp3"], "rb") as _fh:
-                    st.download_button("Скачать исправленный MP3 [%s]" % code, _fh.read(),
-                                       file_name=res["name"] + "_исправлено_%s.mp3" % code, mime="audio/mpeg",
-                                       use_container_width=True, key="dl_fixmp3_%s_%s" % (key, code))
-    other = sorted({c for c in codes if c not in score_fix.FIXES})
-    if other:
-        with st.expander("Почему остальные замечания не исправляются автоматически"):
-            for c in other:
-                st.write("**[%s]** %s" % (c, FIX_NO_AUTO.get(c, "автоисправления пока нет")))
-
-
-def show_gate(gate):
-    """Контроль брака (src/quality_gate.py): объективные ошибки по сравнению с оригиналом. Ошибку не прячет."""
-    st.markdown("#### Контроль брака")
-    if not gate:
-        return
-    if gate.get("error"):
-        st.warning("Контроль брака не выполнился. Причина ниже.")
-        with st.expander("Подробности для разработчика"):
-            st.code(gate["error"])
-        return
-    if gate["ok"]:
-        st.success("Брака не найдено: нет фальшивых нот, мелодия на месте и не скачет, играют все инструменты.")
-    else:
-        st.error("Есть брак (%d). Такую оркестровку не стоит показывать как готовую." % len(gate["defects"]))
-    for code, text, status in gate["defects"]:
-        st.markdown("**[%s]** %s" % (code, text))
-        st.caption("Статус: " + status)
-    for code, text, status in gate["warnings"]:
-        st.markdown("**[%s, предупреждение]** %s" % (code, text))
-        st.caption("Статус: " + status)
-    st.caption("Контроль считает, а не слушает: «брака нет» не значит «звучит хорошо». Судья звучания — слушатель.")
-    tc = gate.get("taste")
-    if tc:
-        st.markdown("#### Проверка по вашему вкусу")
-        if tc.get("error"):
-            st.warning("Проверка по вкусу не выполнилась.")
-            with st.expander("Подробности для разработчика"):
-                st.code(tc["error"])
-        else:
-            names = {c: n for c, n, _ in taste_check.TASTE}
-            why = {c: w for c, _, w in taste_check.TASTE}
-            (st.success if not tc["failed"] else st.warning)("Выполнено %s пунктов." % tc["score"])
-            for c, msg in tc["failed"]:
-                st.markdown("**✗ [%s] %s** — %s" % (c, names[c], msg))
-                st.caption("Ваш отзыв: " + why[c])
-            st.caption("Выполнены: " + ", ".join("%s %s" % (c, names[c]) for c in tc["passed"]))
-
-
-def show_review(review, expanded=True):
-    """Russian-language review of the score (src/score_review.py): findings with an honest status of every rule."""
-    if not review:
-        st.info("Рецензия недоступна.")
-        return
-    s = review["stats"]
-    st.caption("Тактов: %d, темп около %d уд/мин. Инструментов в такте: в среднем %s, от %d до %d. "
-               "Модуль считает, а не слушает: звучание оценивает слушатель." % (
-                   s["тактов"], s["темп_уд_мин"], s["инструментов_в_такте_среднее"], *s["инструментов_в_такте_мин_макс"]))
-    if not review["findings"]:
-        st.success("Замечаний нет.")
-    for _, code, status, text in review["findings"]:
-        st.markdown("**[%s]** %s" % (code, text))
-        st.caption("Статус правила: " + status)
-    if review.get("grid") and review["findings"]:
-        st.markdown("**Карта замечаний.** Строки: инструменты, столбцы: такты. Красное: место замечания.")
-        opts = ["Все замечания сразу"] + ["%d. [%s] %s" % (i + 1, f[1], f[3][:70]) for i, f in enumerate(review["findings"])]
-        pick = st.selectbox("Показать на карте", opts, index=1 if len(opts) > 1 else 0, key="map_pick")
-        only = None if pick == opts[0] else opts.index(pick) - 1
-        st.markdown(score_review.map_html(review, only=only), unsafe_allow_html=True)
-        prep = review.get("notation")
-        if not prep and review.get("notation_error"):
-            st.warning("Ноты с пометками на этот раз не построились (карта выше работает). "
-                       "Пришлите, пожалуйста, текст из раздела ниже разработчику.")
-            with st.expander("Почему нет нот (для разработчика)"):
-                st.code(review["notation_error"][-3000:])
-        if prep:
-            import base64
-            pages, total = score_notation.colored_pages(prep, score_notation.ids_for(review, prep, only), max_pages=4)
-            st.markdown("**Ноты с пометками.** Красные ноты: место выбранного замечания. Показаны страницы %s%s." % (
-                ", ".join(str(p) for p, _ in pages), "" if total <= len(pages) else " (первые %d из %d; все страницы в файле ниже)" % (len(pages), total)))
-            for p, svg in pages:
-                st.markdown("<div style='background:#fff;border:1px solid #d8ccb4;border-radius:6px;padding:6px;margin-bottom:8px'>"
-                            "<img style='width:100%%' src='data:image/svg+xml;base64,%s'/></div>" % base64.b64encode(svg.encode("utf-8")).decode(),
-                            unsafe_allow_html=True)
-            st.download_button("Скачать партитуру с пометками (HTML, открывается в браузере)",
-                               score_notation.standalone_html(review, prep).encode("utf-8"),
-                               file_name="партитура_с_пометками.html", mime="text/html", use_container_width=True, key="dl_notes")
-
-
-
-if go and up is not None and mode == REVIEW_MODE:
-    if up.size > 2 * 1024 * 1024:
-        st.error("Файл больше 2 МБ.")
-    else:
-        _prog = progress.Steps([("review", "рецензия"), ("notes", "ноты с пометками")], progress.midi_seconds(up.getvalue()))
-        with st.spinner("Проверяю партитуру..."):
-            try:
-                _work = tempfile.mkdtemp(prefix="review_")
-                _src = os.path.join(_work, "score.mid")
-                # дорожки «Track 1» / без названия / по-русски: рецензент узнаёт инструменты по названию или номеру
-                _named, _renamed = score_player.name_tracks(up.getvalue())
-                if _renamed:
-                    st.caption("Инструменты узнаны по дорожкам: " + "; ".join(_renamed) + ".")
-                with open(_src, "wb") as _f:
-                    _f.write(_named)
-                _prog.go("review")
-                _rv = score_review.review(_src)
-                if not _rv["stats"]["тактов"]:
-                    raise ValueError("в файле не найдено ни одной дорожки оркестровых инструментов")
-                _prog.go("notes")
-                score_notation.build(_rv, None, _src)
-                _prog.finish()
-                st.session_state.result = {"mode": "review", "review": _rv, "name": os.path.splitext(up.name)[0], "src": _src}
-            except Exception:
-                _prog.abort()
-                st.session_state.result = None
-                st.error("Не удалось проверить файл: %s. Нужен MIDI оркестра (несколько дорожек с инструментами: "
-                         "флейта, гобой, кларнет, фагот, валторна, скрипки, альт, виолончель, контрабас)."
-                         % (sys.exc_info()[1] or "причина ниже"))
-                with st.expander("Подробности для разработчика"):
-                    st.code(traceback.format_exc())
-elif go and up is not None and mode == "Переложение для фортепиано (из оркестра)":
+if go and up is not None and mode == REDUCE_MODE:
     if up.size > 2 * 1024 * 1024:
         st.error("Файл больше 2 МБ.")
     else:
@@ -691,37 +408,6 @@ elif go and up is not None and mode == ENSEMBLE_MODE:
                 _prog.abort()
                 st.session_state.result = None
                 st.error("Не удалось сделать ансамбль. Проверьте, что это фортепианная пьеса в MIDI или MusicXML.")
-                with st.expander("Подробности для разработчика"):
-                    st.code(traceback.format_exc())
-elif go and up is not None and mode == PIANO_REVIEW_MODE:
-    if up.size > 2 * 1024 * 1024 or (orig_up is not None and orig_up.size > 2 * 1024 * 1024):
-        st.error("Файл больше 2 МБ.")
-    else:
-        _prog = progress.Steps([("piano_review", "проверка рук и гармонии"), ("notes", "ноты с пометками")],
-                               progress.midi_seconds(up.getvalue()))
-        with st.spinner("Проверяю переложение..."):
-            try:
-                _prog.go("piano_review")
-                _work = tempfile.mkdtemp(prefix="preview_")
-                _src = os.path.join(_work, "piano.mid")
-                with open(_src, "wb") as _f:
-                    _f.write(up.getvalue())
-                _orig = None
-                if orig_up is not None:
-                    _orig = os.path.join(_work, "orchestra.mid")
-                    with open(_orig, "wb") as _f:
-                        _f.write(orig_up.getvalue())
-                _rv = piano_review.review(_src, _orig)
-                if not _rv["stats"]["нот"]:
-                    raise ValueError("в файле нет нот")
-                _prog.go("notes")
-                score_notation.build_hands(_rv)   # ноты с пометками; ошибка пишется в _rv["notation_error"]
-                _prog.finish()
-                st.session_state.result = {"mode": "piano_review", "review": _rv, "name": os.path.splitext(up.name)[0]}
-            except Exception:
-                _prog.abort()
-                st.session_state.result = None
-                st.error("Не удалось проверить файл. Нужен MIDI фортепиано (одна или две дорожки).")
                 with st.expander("Подробности для разработчика"):
                     st.code(traceback.format_exc())
 elif go and up is not None:
@@ -809,92 +495,32 @@ if _job and st.session_state.get("job_loaded") != _job:
         _show_progress(_job)
 
 res = st.session_state.result
-if res and res.get("mode") == "review":
-    st.markdown(theme.SECTION("III", "Рецензия на партитуру"), unsafe_allow_html=True)
-    st.caption("Программа ничего не исправляет: она показывает, что нашла, и честно называет, чем подтверждено каждое правило.")
-    show_review(res["review"])
-    st.download_button("Скачать карту замечаний (HTML, открывается в браузере)",
-                       score_review.map_html(res["review"], standalone=True).encode("utf-8"),
-                       file_name=res["name"] + "_карта_замечаний.html", mime="text/html", use_container_width=True)
-    show_fix(res, res["src"], "review")
-    res = None
-if res and res.get("mode") == "piano_review":
-    st.markdown(theme.SECTION("III", "Проверка переложения"), unsafe_allow_html=True)
-    st.caption("Программа ничего не исправляет: она показывает, что нашла, и честно называет, чем подтверждено каждое правило. "
-               "Модуль считает, а не слушает: звучание оценивает слушатель.")
-    _rv, _s = res["review"], res["review"]["stats"]
-    st.caption("Тактов: %d, темп около %d уд/мин, нот: %d. Руки определены %s." % (_s["тактов"], _s["темп_уд_мин"], _s["нот"], _s["руки"]))
-    if _s.get("гармония"):
-        st.info("Сохранено высот гармонии оригинала: в среднем %.0f%%; все высоты аккорда звучат в %.0f%% моментов."
-                % (100 * _s["гармония"]["среднее"], 100 * _s["гармония"]["все_высоты"]))
-    if _s.get("между_руками_больше_18"):
-        st.caption("Справка: между руками больше 18 полутонов в %d аккордах. Число не подтверждено источником, "
-                   "в фортепианной музыке это обычно, поэтому это не замечание." % _s["между_руками_больше_18"])
-    if not _rv["findings"]:
-        st.success("Замечаний нет.")
-    for _, code, status, text in _rv["findings"]:
-        st.markdown("**[%s]** %s" % (code, text))
-        st.caption("Статус правила: " + status)
-    _only = None
-    if _rv["findings"]:
-        st.markdown("**Карта замечаний.** Строки: руки, столбцы: такты. Красное: место замечания.")
-        _opts = ["Все замечания сразу"] + ["%d. [%s] %s" % (i + 1, f[1], f[3][:70]) for i, f in enumerate(_rv["findings"])]
-        _pick = st.selectbox("Показать на карте", _opts, index=1 if len(_opts) > 1 else 0, key="pmap_pick")
-        _only = None if _pick == _opts[0] else _opts.index(_pick) - 1
-        st.markdown(score_review.map_html(_rv, only=_only), unsafe_allow_html=True)
-    _prep = _rv.get("notation")
-    if not _prep and _rv.get("notation_error"):
-        st.warning("Ноты с пометками на этот раз не построились (карта выше работает). "
-                   "Пришлите, пожалуйста, текст из раздела ниже разработчику.")
-        with st.expander("Почему нет нот (для разработчика)"):
-            st.code(_rv["notation_error"][-3000:])
-    if _prep:
-        import base64
-        _pages, _total = score_notation.colored_pages(_prep, score_notation.ids_for(_rv, _prep, _only), max_pages=4)
-        st.markdown("**Ноты с пометками.** Две строки: правая и левая рука. Красные ноты: место замечания "
-                    "(если выбрано одно). Показаны страницы %s%s." % (
-                        ", ".join(str(p) for p, _ in _pages),
-                        "" if _total <= len(_pages) else " (первые %d из %d; все страницы в файле ниже)" % (len(_pages), _total)))
-        for _p, _svg in _pages:
-            st.markdown("<div style='background:#fff;border:1px solid #d8ccb4;border-radius:6px;padding:6px;margin-bottom:8px'>"
-                        "<img style='width:100%%' src='data:image/svg+xml;base64,%s'/></div>" % base64.b64encode(_svg.encode("utf-8")).decode(),
-                        unsafe_allow_html=True)
-        st.download_button("Скачать ноты с пометками (HTML, открывается в браузере)",
-                           score_notation.standalone_html(_rv, _prep, title="Переложение с пометками").encode("utf-8"),
-                           file_name=res["name"] + "_переложение_с_пометками.html", mime="text/html",
-                           use_container_width=True, key="dl_piano_notes")
-    st.download_button("Скачать отчёт и карту (HTML, открывается в браузере)",
-                       score_review.map_html(_rv, standalone=True).encode("utf-8"),
-                       file_name=res["name"] + "_проверка_переложения.html", mime="text/html", use_container_width=True)
-    res = None
 if res and res.get("mode") == "ensemble":
     import ensemble
     st.markdown(theme.SECTION("III", "Ансамбль"), unsafe_allow_html=True)
     _er = res["report"]
-    st.info(ensemble.text(_er))
-    _pl = _er.get("planner")
-    if _pl and _pl.get("used"):
-        st.caption("План написала модель: заказано %s, сервис ответил %s; запросов: %d."
-                   % (_pl.get("model_requested") or "по умолчанию", ", ".join(_pl.get("model_served_by_api") or ["?"]), len(_pl["rounds"])))
-    elif _pl:
-        st.warning("План модели не использован: %s. Ансамбль сделан без плана (мелодию ведёт верхний инструмент)." % _pl.get("error"))
-        with st.expander("Что ответила модель (для разработчика)"):
-            st.json(_pl)
-    _fg = _er.get("foreign")
-    if _fg:
-        st.caption("Проверка на фальшь: %d из %d нот ансамбля не совпадают с тем, что в эту долю играет фортепиано."
-                   % (_fg.get("bad", 0), _fg.get("total", 0)))
-    elif _er.get("foreign_error"):
-        st.warning("Проверку на фальшь выполнить не удалось.")
-        with st.expander("Подробности для разработчика"):
-            st.code(_er["foreign_error"])
     if res["mp3"]:
         st.audio(res["mp3"], format="audio/mpeg")
     else:
-        st.info("Звуковая запись сейчас недоступна на сервере. Скачайте MIDI и откройте его в MuseScore или в партитурном проигрывателе.")
+        st.info("Звуковая запись сейчас недоступна на сервере. Скачайте MIDI и откройте его в MuseScore или в проигрывателе.")
+    _fg = _er.get("foreign")
+    if _fg:
+        (st.success if not _fg.get("bad") else st.warning)(
+            "Проверка на фальшь: %d из %d нот не совпадают с тем, что в эту долю играет фортепиано." % (_fg.get("bad", 0), _fg.get("total", 0)))
     st.download_button("Скачать ансамбль (MIDI)", open(res["midi"], "rb").read(),
                        file_name="%s_%s.mid" % (res["name"], _er["ensemble"]), mime="audio/midi", use_container_width=True)
-    st.caption("Ноты по строкам и звук в браузере: откройте скачанный MIDI в партитурном проигрывателе (ссылка вверху страницы).")
+    with st.expander("Что сделала программа"):
+        st.write(ensemble.text(_er))
+        _pl = _er.get("planner")
+        if _pl and _pl.get("used"):
+            st.caption("План написала модель: заказано %s, сервис ответил %s; запросов: %d."
+                       % (_pl.get("model_requested") or "по умолчанию", ", ".join(_pl.get("model_served_by_api") or ["?"]), len(_pl["rounds"])))
+        elif _pl:
+            st.warning("План модели не использован: %s. Ансамбль сделан без плана." % _pl.get("error"))
+            st.json(_pl)
+        if _er.get("foreign_error"):
+            st.warning("Проверку на фальшь выполнить не удалось.")
+            st.code(_er["foreign_error"])
     res = None
 if res and res.get("mode") == "reduction":
     st.markdown(theme.SECTION("III", "Результат переложения"), unsafe_allow_html=True)
@@ -910,76 +536,21 @@ if res and res.get("mode") == "reduction":
     res = None
 if res:
     st.markdown(theme.SECTION("III", "Результат"), unsafe_allow_html=True)
-    # Партитурный проигрыватель (web/pages/1_Проигрыватель.py): ноты по станам и звук в браузере
-    _pj = st.session_state.get("job")
-    if _pj:
-        st.markdown("🎼 [**Открыть в партитурном проигрывателе** (новая вкладка)](Проигрыватель?job=%s)" % _pj)
-        st.page_link("pages/1_Проигрыватель.py", label="…или открыть здесь", icon="🎼")
     if res["mp3"]:
         st.audio(res["mp3"], format="audio/mpeg")
-        _sf = os.path.basename(audio_tools.LAST_SOUNDFONT or "")
-        if _sf:
-            st.caption("Звук сделан набором инструментов «%s»%s." % (os.path.splitext(_sf)[0],
-                       "" if "MS Basic" in _sf else " (маленький набор: звучит проще, чем в MuseScore)"))
     else:
         st.info("Звуковая запись сейчас недоступна на сервере. Скачайте MIDI и откройте его в программе для музыки.")
-    _rs = (res.get("report") or {}).get("resources")
-    if _rs:
-        with st.expander("Ресурсы сервера (время и память)"):
-            st.write(resources.text(_rs) + ".")
-            _tm = (res.get("report") or {}).get("timings_s") or {}
-            for _k, _v in (_rs.get("memory_after_step") or {}).items():
-                st.write("• шаг «%s»: %s с, память приложения после шага %s МБ" % (
-                    _k, _tm.get(_k, "?"), _v.get("rss_mb", "?")))
-            st.caption("Цифры для вопроса «хватает ли облаку памяти». Они же лежат в report.json внутри ZIP.")
-
-    if ((res.get("report") or {}).get("planner") or {}).get("provider") == "вставлен вручную":
-        st.info("План: вставлен вручную в окно «План оркестровки от другой модели». Модель в этот раз не вызывалась.")
-    elif not res.get("llm_log"):
-        st.info("План: встроенный планировщик программы (модель не вызывалась).")
-    if res.get("llm_log"):
-        _pi = (res.get("report") or {}).get("planner") or {}
-        st.info("План написала модель %s. Проверок плана: %d. Заказано: %s; сервис ответил: %s." % (
-            PROVIDER, len(res["llm_log"]), _pi.get("model_requested") or "(не задано)",
-            ", ".join(_pi.get("model_served_by_api") or []) or "—"))
-    issues = res["issues"]
-    errors = [i for i in issues if i[0] == "error"]
-    warns = [i for i in issues if i[0] == "warning"]
     _solo = (((res.get("report") or {}).get("plan_log") or {}).get("solo") or {})
     if _solo.get("instrument"):
-        st.info("Мелодию ведёт: %s." % SOLO_NAMES.get(_solo["instrument"], _solo["instrument"]))
-        if _solo.get("changes"):
-            with st.expander("Кто где солирует и кто молчит в сопровождении"):
-                for _c in _solo["changes"]:
-                    st.write("• " + _c)
-    show_gate(res.get("gate"))
-    if errors:
-        st.error("Найдены серьёзные ошибки: %d. Результат не рекомендуется использовать." % len(errors))
-    elif warns:
-        st.warning("Проверка пройдена с замечаниями (%d). Они описаны ниже." % len(warns))
-    else:
-        st.success("Проверка пройдена без замечаний.")
-
-    st.markdown("#### Фразы и состав")
-    rows = []
-    for ph in res["plan"]["phrases"]:
-        rows.append({"Такты": "%d–%d" % tuple(ph["bars"]), "Тип": ph["kind"],
-                     "Окраска мелодии": ph.get("color") or "—", "Громкость": ph["level"],
-                     "Кульминация": "да" if ph["climax"] else ""})
-    st.table(rows)
-
-    with st.expander("Рецензия на партитуру (по-русски)", expanded=True):
-        show_review(res.get("review"))
-
-    if res.get("review"):
-        show_fix(res, res["stem"] + ".mid", "orch")
-
-    with st.expander("Технические замечания проверки (английские коды)"):
-        if not issues:
-            st.write("Замечаний нет.")
-        for sev, rid, _, msg in issues:
-            st.write("**%s** %s: %s" % ("Ошибка" if sev == "error" else "Замечание", rid, msg))
-
+        st.caption("Мелодию ведёт: %s." % SOLO_NAMES.get(_solo["instrument"], _solo["instrument"]))
+    _ok, _line = analysis_ui.verdict_line(res)
+    (st.success if _ok else st.warning)("Проверка: %s. Подробности, карта замечаний и исправления — на странице "
+                                        "«Анализ и проверки»." % _line)
+    _c1, _c2 = st.columns(2)
+    with _c1:
+        st.page_link("pages/2_Анализ.py", label="Анализ и проверки", icon="🔎", use_container_width=True)
+    with _c2:
+        st.page_link("pages/1_Проигрыватель.py", label="Ноты в проигрывателе", icon="🎼", use_container_width=True)
     st.markdown("#### Скачать")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:

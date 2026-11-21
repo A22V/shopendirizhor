@@ -21,9 +21,9 @@ def _uri(svg):
 
 # --- стена с панелями (фон страницы); на стене нет текста ------------------------------------------
 # Плитка симметрична (панель по центру, полосы с рейками на обоих краях), чтобы узор был зеркальным
-# относительно листа. Два варианта цвета: «светлая» (бледно-голубая) и «глубокая» (насыщенный дворцовый голубой).
+# относительно листа. Один вариант цвета: «глубокая» (насыщенный дворцовый синий). Светлая убрана 2026-11-21
+# по просьбе пользователя.
 WALLS = {
-    "light": dict(base="#e3ecf5", stripe="#f1f6fb", panel="#ecf2f9", inner="#ffffff", line="#cdb36a", rose="#d6c07e"),
     "deep":  dict(base="#7d9ec4", stripe="#9ab7d6", panel="#89a9cd", inner="#e8f0f9", line="#e2c46e", rose="#e6cb7c"),
 }
 
@@ -42,8 +42,8 @@ def _wall(c):
         "</svg>")
 
 
-def WALL_CSS(name):
-    """Правило фона страницы для выбранной стены (в приложении вставляется отдельно, чтобы переключать)."""
+def WALL_CSS(name="deep"):
+    """Правило фона страницы (одна стена: «глубокая»)."""
     c = WALLS[name]
     return ".stApp {{ background: {} center top / 280px 440px repeat, {}; }}".format(_uri(_wall(c)), c["base"])
 
@@ -148,9 +148,9 @@ def CSS():
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=Cormorant+SC:wght@600;700&family=PT+Serif:ital,wght@0,400;0,700;1,400&family=Great+Vibes&family=Marck+Script&display=swap');
 :root {{ --gold:{GOLD}; --gold-hi:{GOLD_HI}; --gold-lo:{GOLD_LO}; --crimson:{CRIMSON}; --crimson-hi:{CRIMSON_HI};
         --crimson-lo:{CRIMSON_LO}; --ink:{INK}; --paper:{PAPER}; --muted:#5e4b39; --navy:#23395b; }}
-/* страница: бледно-голубая стена с панелями; на ней НЕТ текста */
+/* страница: синяя стена с панелями; на ней НЕТ текста */
 .stApp {{ color: var(--ink); }}
-{WALL_CSS('light')}
+{WALL_CSS('deep')}
 [data-testid="stHeader"] {{ background: transparent; }}
 html, body, .stApp, [data-testid="stMarkdownContainer"], label, p, li {{
   font-family: 'PT Serif', 'Georgia', 'Times New Roman', serif; font-size: 17.5px; line-height: 1.6; color: var(--ink); }}
@@ -198,9 +198,7 @@ h3::after {{ content: ""; flex: 1; height: 1px; background: linear-gradient(90de
 .bq-audio {{ background: #fffdf8; border: 1px solid #e2cf9b; border-radius: 8px; padding: .6rem .8rem; }}
 audio {{ width: 100%; }}
 input[type=radio], input[type=checkbox] {{ accent-color: var(--crimson); }}
-.st-key-wall [data-testid="stRadio"] {{ display: flex; justify-content: center; }}
-.st-key-wall [role="radiogroup"] {{ justify-content: center; }}
-.st-key-wall label, .st-key-wall p {{ font-size: .95rem !important; color: var(--muted); }}
+.bq-nav {{ text-align: center; margin: -.2rem 0 .6rem; color: var(--muted); }}
 [data-testid="stDecoration"] {{ display: none; }}
 /* декор вокруг: ламбрекен сверху, занавеси по бокам. Только украшение: клики проходят сквозь */
 .bq-valance {{ position: fixed; top: 0; left: 0; right: 0; height: 128px; z-index: 5; pointer-events: none; }}
@@ -223,7 +221,7 @@ input[type=radio], input[type=checkbox] {{ accent-color: var(--crimson); }}
   [data-testid="stMainBlockContainer"], .block-container {{ margin: 92px 10px 30px; padding: 2.6rem 1.1rem 1.6rem !important;
     outline-offset: 3px; background-size: 40px 40px, 40px 40px, 40px 40px, 40px 40px, auto; }}
   .bq-valance {{ height: 80px; }}
-  .bq-title h1 {{ font-size: 3.3rem !important; }}
+  .bq-title h1 {{ font-size: min(3.3rem, 14vw) !important; white-space: nowrap; }}
   html, body, .stApp, [data-testid="stMarkdownContainer"], label, p, li {{ font-size: 16.5px; }}
 }}
 </style>"""
@@ -241,6 +239,12 @@ def TITLE():
     return ("<div class='bq-title'>" + LYRE + "<h1>Оркестратор</h1>"
             "<p class='bq-motto'>Фортепианная пьеса — оркестровый наряд</p></div>"
             "<div class='bq-fleuron'>" + FLEURON + "</div>")
+
+
+def PAGE_TITLE(text, motto=""):
+    """Заголовок второстепенной страницы (анализ, генератор): меньше главного, без лиры."""
+    return ("<div class='bq-title'><h1 style='font-size:3.4rem !important'>%s</h1>%s</div>"
+            "<div class='bq-fleuron'>" % (text, "<p class='bq-motto'>%s</p>" % motto if motto else "") + FLEURON + "</div>")
 
 
 def SECTION(num, text):
