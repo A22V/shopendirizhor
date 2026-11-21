@@ -185,6 +185,42 @@ def to_midi(piece, path):
     return info, fixes
 
 
+def parallels(midi_path):
+    """Параллельные октавы и квинты между мелодией (верхняя нота правой руки) и басом (нижняя нота левой руки)
+    на первых долях соседних тактов. Запрет: учебник гармонии §11–13 (подтверждено, см. CLAUDE.md 12.52);
+    «только первые доли соседних тактов» — эвристика (так их слышно сильнее всего). Возвращает [(такт, такт+1, вид)]."""
+    m = mido.MidiFile(midi_path)
+    tpb = m.ticks_per_beat
+    num, den = 4, 4
+    for t in m.tracks:
+        for x in t:
+            if x.type == "time_signature":
+                num, den = x.numerator, x.denominator
+    bar = num * 4.0 / den
+
+    def starts(track):
+        a, out = 0, []
+        for x in track:
+            a += x.time
+            if x.type == "note_on" and x.velocity > 0:
+                out.append((a / tpb, x.note))
+        return out
+    if len(m.tracks) < 3:
+        return []
+    rh, lh = starts(m.tracks[1]), starts(m.tracks[2])
+    n = int(round(max([s for s, _ in rh + lh] or [0]) / bar)) + 1
+    mel = [max([p for s, p in rh if abs(s - i * bar) < 1e-3] or [None]) if any(abs(s - i * bar) < 1e-3 for s, _ in rh) else None for i in range(n)]
+    bas = [min([p for s, p in lh if abs(s - i * bar) < 1e-3]) if any(abs(s - i * bar) < 1e-3 for s, _ in lh) else None for i in range(n)]
+    out = []
+    for i in range(n - 1):
+        if None in (mel[i], mel[i + 1], bas[i], bas[i + 1]) or mel[i] == mel[i + 1]:
+            continue
+        a, b = (mel[i] - bas[i]) % 12, (mel[i + 1] - bas[i + 1]) % 12
+        if a == b and a in (0, 7):
+            out.append((i + 1, i + 2, "октавы" if a == 0 else "квинты"))
+    return out
+
+
 def check(info, fixes, midi_path, want_bars):
     """Замечания к пьесе: (серьёзные, мелкие). Серьёзные уходят модели на переписывание."""
     serious, minor = [], []
@@ -200,6 +236,15 @@ def check(info, fixes, midi_path, want_bars):
     bar_fix = [f for f in fixes if f.startswith("такт")]
     if len(bar_fix) > max(2, info["bars"] // 5):
         serious.append("Счёт в тактах не сходится в %d местах (длительности не складываются в размер)." % len(bar_fix))
+    try:
+        par = parallels(midi_path)
+        if par:
+            serious.append("Параллельные %s между мелодией и басом на первых долях тактов: %s. Перепишите эти такты "
+                           "(другая нота мелодии или баса, лучше противоположное движение)." % (
+                               " и ".join(sorted(set(k for _, _, k in par))),
+                               ", ".join("%d–%d (%s)" % x for x in par)))
+    except Exception as e:
+        minor.append("Проверка параллелей не выполнилась: %s" % e)
     try:
         import piano_review
         rv = piano_review.review(midi_path)

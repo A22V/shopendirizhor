@@ -845,6 +845,10 @@ try:
           and composer.suggest_target("для флейты с оркестром") == ("orch", "Flute")
           and any("обрезан" in f for f in _bad) and any("пауза" in f for f in _bad)
           and composer._key("си-бемоль минор") == (10, True))
+    _pm = _r["midi"] + ".par.mid"     # параллельные октавы мелодия–бас на первых долях (12.82)
+    composer.to_midi({"time": "3/4", "bars": [{"rh": [["A4", 3]], "lh": [["A2", 3]]}, {"rh": [["B4", 3]], "lh": [["B2", 3]]},
+                                             {"rh": [["C5", 3]], "lh": [["A2", 3]]}]}, _pm)
+    ok = ok and composer.parallels(_pm) == [(1, 2, "октавы")] and composer.parallels(_r["midi"]) == []
     print("%-30s %s  запросов %d, тактов %d, гамма %.0f%%" % ("генератор пьес", "OK " if ok else "FAIL", len(_calls),
           _r["info"]["bars"], 100 * (_r["info"]["scale_share"] or 0)))
     failed += 0 if ok else 1
