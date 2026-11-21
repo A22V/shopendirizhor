@@ -163,7 +163,8 @@ mode = st.radio("Что сделать", [ORCH_MODE, ENSEMBLE_MODE, REDUCE_MODE]
 use_llm = False
 if LLM_READY and mode != ENSEMBLE_MODE:
     use_llm = st.checkbox("Помощь модели (%s): %s" % (PROVIDER, "план оркестровки" if mode == ORCH_MODE else "выбор голосов"),
-                          value=True, help="Модель пишет план по смыслу фраз, программа проверяет его. Платный запрос.")
+                          value=True, help="Галочка стоит — модель пишет план (кто и где ведёт мелодию), программа расставляет ноты и проверяет. "
+                               "Платный запрос. Галочки нет — всё решает программа сама, бесплатно.")
 ens_pick = None
 if mode == ENSEMBLE_MODE:
     import ensemble
@@ -372,7 +373,7 @@ if go and up is not None and mode == REDUCE_MODE:
                 except Exception:
                     _mp3 = None
                 _prog.finish()
-                st.session_state.result = {"mode": "reduction", "stats": _stats, "midi": _out,
+                st.session_state.result = {"mode": "reduction", "stats": _stats, "midi": _out, "llm": bool(use_llm),
                                            "mp3": _mp3 if _mp3 and os.path.exists(_mp3) else None,
                                            "name": os.path.splitext(up.name)[0]}
             except Exception:
@@ -517,11 +518,18 @@ if res and res.get("mode") == "ensemble":
     if _fg:
         (st.success if not _fg.get("bad") else st.warning)(
             "Проверка на фальшь: %d из %d нот не совпадают с тем, что в эту долю играет фортепиано." % (_fg.get("bad", 0), _fg.get("total", 0)))
+    _pl = _er.get("planner")
+    if _pl and _pl.get("used"):
+        st.info("Кто решал: модель %s написала план (кто и где ведёт мелодию), программа раздала ноты. Запросов к модели: %d."
+                % (", ".join(_pl.get("model_served_by_api") or []) or _pl.get("model_requested") or PROVIDER, len(_pl["rounds"])))
+    elif _pl:
+        st.warning("Кто решал: программа сама — план модели не подошёл (%s)." % _pl.get("error"))
+    else:
+        st.info("Кто решал: программа сама, по своим правилам (модель не вызывалась, бесплатно).")
     st.download_button("Скачать ансамбль (MIDI)", open(res["midi"], "rb").read(),
                        file_name="%s_%s.mid" % (res["name"], _er["ensemble"]), mime="audio/midi", use_container_width=True)
     with st.expander("Что сделала программа"):
         st.write(ensemble.text(_er))
-        _pl = _er.get("planner")
         if _pl and _pl.get("used"):
             st.caption("План написала модель: заказано %s, сервис ответил %s; запросов: %d."
                        % (_pl.get("model_requested") or "по умолчанию", ", ".join(_pl.get("model_served_by_api") or ["?"]), len(_pl["rounds"])))
@@ -538,6 +546,8 @@ if res and res.get("mode") == "reduction":
     st.info("Оригинал: %d нот. Фортепиано: правая рука %d, левая %d. "
             "Сохранено высот гармонии: %.0f%%; в %.0f%% моментов звучат все высоты аккорда."
             % (s["notes_in"], s["notes_rh"], s["notes_lh"], 100 * s["pitch_class_coverage"], 100 * s["full_coverage_share"]))
+    st.info("Кто решал: модель (%s) выбрала, какие голоса оставить, программа сделала переложение." % PROVIDER
+            if res.get("llm") else "Кто решал: программа сама, по своим правилам (модель не вызывалась, бесплатно).")
     st.caption("Переложение механическое: внутренние голоса в плотных местах удаляются. Это не фортепианная переработка.")
     if res["mp3"]:
         st.audio(res["mp3"], format="audio/mpeg")
@@ -553,6 +563,7 @@ if res:
     _solo = (((res.get("report") or {}).get("plan_log") or {}).get("solo") or {})
     if _solo.get("instrument"):
         st.caption("Мелодию ведёт: %s." % SOLO_NAMES.get(_solo["instrument"], _solo["instrument"]))
+    st.info(analysis_ui.who_line(res, PROVIDER))
     _ok, _line = analysis_ui.verdict_line(res)
     (st.success if _ok else st.warning)("Проверка: %s. Подробности, карта замечаний и исправления — на странице "
                                         "«Анализ и проверки»." % _line)
