@@ -55,6 +55,16 @@ if "result" not in st.session_state:
 
 st.markdown(theme.SECTION("I", "Загрузите пьесу"), unsafe_allow_html=True)
 up = checked_midi(any_file("Пьеса: MIDI (.mid) или MusicXML (.musicxml, .xml, .mxl), до 5 МБ", "piece", diagnostics=True))
+_gen = st.session_state.get("gen_piece")             # пьеса, присланная со страницы «Генератор»
+if up is None and _gen:
+    up = common._Upload(_gen["name"], _gen["data"])
+    _g1, _g2 = st.columns([3, 1])
+    with _g1:
+        st.info("Пьеса из генератора: «%s». Выбранный выше файл заменит её." % os.path.splitext(_gen["name"])[0])
+    with _g2:
+        if st.button("Убрать", key="gen_drop"):
+            st.session_state.pop("gen_piece", None)
+            st.rerun()
 
 def reset_all():
     """«Начать заново»: забыть файлы, результат и настройки этой сессии, стереть её задание на сервере."""

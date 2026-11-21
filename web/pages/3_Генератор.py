@@ -1,0 +1,131 @@
+"""
+Страница «Генератор» (2026-11-21): фортепианная пьеса по описанию словами (src/composer.py).
+Модель сочиняет фортепиано; оркестр, ансамбль или солиста делает основная программа — кнопка «Отправить».
+Каждое нажатие «Сочинить» / «Ещё вариант» — платный запрос к модели из Secrets (PLANNER_PROVIDER / PLANNER_MODEL).
+"""
+import os, sys, traceback
+import streamlit as st
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import common                     # noqa: E402  (первым: секреты → окружение)
+import composer, audio_tools, llm_planner   # noqa: E402,E401
+
+st.set_page_config(page_title="Генератор пьес", page_icon="✒️", layout="centered")
+common.decorate("Генератор", "фортепианная пьеса по вашему описанию")
+common.nav("Генератор")
+
+PROVIDER, KEY, MODEL = llm_planner.configured_provider()
+READY = bool(PROVIDER and KEY and MODEL)
+AUTO = "на выбор модели"
+
+with st.expander("Как это работает"):
+    st.markdown(
+        "Модель (%s) сочиняет **фортепианную** пьесу: мелодия в правой руке, сопровождение в левой. Программа "
+        "переводит её в MIDI и проверяет: число тактов, тональность, удобство для рук пианиста. Если что-то серьёзно "
+        "не так, модель один раз переписывает пьесу. Потом вы слушаете и, если нравится, отправляете пьесу на "
+        "главную: в оркестр (можно с солистом), в ансамбль или оставляете как есть.\n\n"
+        "- Каждое «Сочинить» и «Ещё вариант» — платный запрос (у Haiku обычно меньше цента; второй запрос — только "
+        "если первая попытка с ошибками).\n"
+        "- Модель сочиняет грамотно, но просто. Лучше всего получаются пьесы на 16–32 такта.\n"
+        "- Программа не слышит музыку: хорошо ли звучит, решаете вы." % (MODEL or "не настроена"))
+
+if not READY:
+    st.warning("Модель не настроена: в Secrets нужны PLANNER_PROVIDER, PLANNER_MODEL и ключ. Без неё генератор не работает.")
+
+st.markdown(common.theme.SECTION("I", "Опишите пьесу"), unsafe_allow_html=True)
+req = st.text_area("Что сочинить", key="gen_req", height=110,
+                   placeholder="Например: нежный вальс в духе Шопена, ля минор, для флейты с оркестром")
+c1, c2 = st.columns(2)
+with c1:
+    bars = st.selectbox("Длина (тактов)", [8, 16, 24, 32], index=1, key="gen_bars")
+    meter = st.selectbox("Размер", [AUTO, "4/4", "3/4", "6/8", "2/4"], key="gen_meter")
+with c2:
+    key = st.text_input("Тональность", key="gen_key", placeholder=AUTO,
+                        help="Например: ре мажор, ля минор, Bb major. Пусто — выберет модель по описанию.")
+    tempo = st.selectbox("Темп (четвертей в минуту)", [AUTO, 60, 72, 84, 96, 108, 120, 138], key="gen_tempo")
+
+
+def _compose(variant):
+    with st.spinner("Модель сочиняет (обычно 20–60 секунд)..."):
+        try:
+            r = composer.compose(req, bars=bars, key=key.strip() or None,
+                                 time_sig=None if meter == AUTO else meter,
+                                 tempo=None if tempo == AUTO else int(tempo), variant=variant)
+            try:
+                r["mp3"] = open(audio_tools.render_mp3(r["midi"], os.path.splitext(r["midi"])[0] + ".mp3"), "rb").read()
+            except Exception:
+                r["mp3"] = None
+            r["data"] = open(r["midi"], "rb").read()
+            r["request"], r["variant"] = req, variant
+            st.session_state["gen_res"] = r
+        except Exception as e:
+            st.error("Не получилось сочинить пьесу: %s" % e)
+            with st.expander("Подробности для разработчика"):
+                st.code(traceback.format_exc())
+
+
+if st.button("✒️ Сочинить (платный запрос)", disabled=not READY or not req.strip(), use_container_width=True, key="gen_go"):
+    st.session_state["gen_n"] = st.session_state.get("gen_n", 0) + 1
+    _compose(st.session_state["gen_n"])
+
+r = st.session_state.get("gen_res")
+if r:
+    inf = r["info"]
+    st.markdown(common.theme.SECTION("II", "«%s»" % inf["title"]), unsafe_allow_html=True)
+    st.caption("Вариант %d · %d тактов · размер %s · темп %d · %s · около %d с" % (
+        r["variant"], inf["bars"], inf["time"], inf["tempo"], inf.get("key") or "тональность не указана", inf["seconds"]))
+    if r.get("mp3"):
+        st.audio(r["mp3"], format="audio/mpeg")
+    if r["serious"]:
+        st.warning("Проверка: есть замечания — " + " ".join(r["serious"]))
+    else:
+        st.success("Проверка: такты, тональность и руки пианиста в порядке." if not r["minor"] else
+                   "Проверка: серьёзных замечаний нет (мелкие ниже).")
+    if r["minor"] or r["fixes"]:
+        with st.expander("Мелкие замечания и что программа поправила"):
+            for m in r["minor"]:
+                st.write("• " + m)
+            for f in r["fixes"]:
+                st.write("• исправлено: " + f)
+    st.caption("Запросов к модели: %d; ответила модель: %s." % (len(r["rounds"]), ", ".join(r.get("served") or ["?"])))
+    fname = "%s.mid" % (inf["title"] or "Пьеса").replace("/", "_")[:60]
+    st.download_button("Скачать пьесу (MIDI)", r["data"], file_name=fname, mime="audio/midi", use_container_width=True)
+    if st.button("🎲 Ещё вариант (платный запрос)", disabled=not READY, use_container_width=True, key="gen_more"):
+        st.session_state["gen_n"] = st.session_state.get("gen_n", 0) + 1
+        _compose(st.session_state["gen_n"])
+        st.rerun()
+
+    st.markdown(common.theme.SECTION("III", "Что сделать с пьесой"), unsafe_allow_html=True)
+    import ensemble
+    mode, what = composer.suggest_target(r["request"])
+    SOLO_RU = {"Flute": "Флейта (нежная, невысокая)", "Clarinet": "Кларнет", "Oboe": "Гобой", "Cello": "Виолончель",
+               "Violin I": "Скрипка"}
+    opts = ["Оркестр", "Оркестр с солистом", "Оркестр, солисты как в «Болеро»", "Ансамбль"]
+    default = 3 if mode == "ensemble" else 2 if what == "Bolero" else 1 if what else 0
+    target = st.radio("Куда отправить", opts, index=default, key="gen_target")
+    solo_ru = ens_key = None
+    if target == opts[1]:
+        names = list(SOLO_RU.values())
+        solo_ru = st.selectbox("Солист", names, index=names.index(SOLO_RU[what]) if what in SOLO_RU else 0, key="gen_solo")
+    if target == opts[3]:
+        ens_names = {e["ru"]: k for k, e in ensemble.ENSEMBLES.items()}
+        keys = list(ens_names)
+        idx = keys.index(ensemble.ENSEMBLES[what]["ru"]) if mode == "ensemble" and what in ensemble.ENSEMBLES else 0
+        ens_key = ens_names[st.selectbox("Состав", keys, index=idx, key="gen_ens")]
+    if mode != "piano":
+        st.caption("Подсказано по словам вашего описания; можно выбрать другое.")
+    if st.button("Отправить на главную", use_container_width=True, key="gen_send"):
+        st.session_state["gen_piece"] = {"name": fname, "data": r["data"]}
+        if target == opts[3]:
+            st.session_state["mode_pick"] = "Ансамбль: дуэт, трио, квартет (из фортепиано)"
+            grp = ensemble.ENSEMBLES[ens_key]["group"]
+            st.session_state["ens_group"] = grp
+            st.session_state["ens_pick_" + grp] = ensemble.ENSEMBLES[ens_key]["ru"]
+        else:
+            st.session_state["mode_pick"] = "Оркестровка (из фортепиано)"
+            st.session_state["lead_pick"] = ["Оркестр сам распределяет мелодию", "Один солист на всю пьесу",
+                                             "Меняющиеся солисты, как в «Болеро»"][opts.index(target) if target != opts[0] else 0]
+            if solo_ru:
+                st.session_state["solo_pick"] = solo_ru
+        st.switch_page("app.py")
+st.markdown(common.theme.FOOTER(), unsafe_allow_html=True)

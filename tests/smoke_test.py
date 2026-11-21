@@ -829,5 +829,26 @@ except Exception as _e:
 print("%-30s %s  %s" % ("гобой и флейта подыгрывают", "OK " if _ok else "FAIL", _msg))
 if not _ok: failed += 1
 
+# генератор пьес (src/composer.py, 2026-11-21): JSON модели -> MIDI, проверка, переписывание после плохого ответа
+try:
+    import composer, json as _json
+    _bars = [{"dyn": "mp", "rh": [["A4", 2], ["C5", 1]], "lh": [["A2", 1], [["C4", "E4"], 1], [["C4", "E4"], 1]]},
+             {"dyn": "mf", "rh": [["B4", 1], ["A4", 1], ["G#4", 1]], "lh": [["E2", 1], [["B3", "D4"], 1], [["B3", "D4"], 1]]}] * 4
+    _ans = ["не JSON", _json.dumps({"title": "t", "key": "A minor", "time": "3/4", "tempo": 120, "bars": _bars})]
+    _calls = []
+    def _fake(p, m, k, sy, us):
+        _calls.append(us); return _ans[min(len(_calls) - 1, 1)]
+    _r = composer.compose("вальс для квартета", bars=8, provider="claude", model="x", api_key="k", call=_fake)
+    _bad = composer.to_midi({"time": "3/4", "bars": [{"rh": [["C5", 4]], "lh": [["C3", 1]]}]}, _r["midi"] + ".2.mid")[1]
+    ok = (_r["info"]["bars"] == 8 and not _r["serious"] and len(_calls) == 2 and "problems" in _calls[1]
+          and composer.suggest_target("вальс для струнного квартета") == ("ensemble", "quartet_string")
+          and composer.suggest_target("для флейты с оркестром") == ("orch", "Flute")
+          and any("обрезан" in f for f in _bad) and any("пауза" in f for f in _bad)
+          and composer._key("си-бемоль минор") == (10, True))
+    print("%-30s %s  запросов %d, тактов %d, гамма %.0f%%" % ("генератор пьес", "OK " if ok else "FAIL", len(_calls),
+          _r["info"]["bars"], 100 * (_r["info"]["scale_share"] or 0)))
+    failed += 0 if ok else 1
+except Exception:
+    print("генератор пьес FAIL (исключение)"); traceback.print_exc(); failed += 1
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)
