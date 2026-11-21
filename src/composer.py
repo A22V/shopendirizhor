@@ -19,6 +19,7 @@ import mido
 
 import llm_planner
 
+CONT_MAX = 4           # дописываний оборванной пьесы (каждое — платный запрос, у Haiku доли цента)
 MAX_ROUNDS = 2          # запросов к модели на одну пьесу (второй — только если первая попытка с серьёзными замечаниями)
 TPB = 480
 DYN = {"pp": 36, "p": 46, "mp": 58, "mf": 70, "f": 84, "ff": 98}        # эвристика
@@ -55,7 +56,8 @@ Rules:
 5. Harmony: stay in the key with clear functional harmony (I, IV, V, ii, vi, secondary dominants allowed); modulate only
    if asked; avoid parallel fifths and octaves between melody and bass.
 6. "dyn" per bar: pp, p, mp, mf, f or ff, following the shape of the music. Use "pedal": "bar" for lyrical pieces.
-7. Write exactly the requested number of bars. No text outside the JSON.
+7. Write exactly the requested number of bars, ALL of them in full: never abbreviate, never write "..." or "same as
+   above". Keep the JSON compact (no line breaks or extra spaces). No text outside the JSON.
 8. If the request is a structured template ([Паспорт], sections with bar numbers, chords, [Запреты]), follow it EXACTLY:
    key, time, tempo and length from [Паспорт]; each section in exactly its bars; the given chords in the given bars
    (chord symbols like Dm, A7, Gm/Bb, Cmaj7, E7sus4; "|" separates groups of bars, chords are spread evenly over the
@@ -331,6 +333,61 @@ def parse_piece(text):
             raise ValueError("%s; место ошибки: …%s…" % (first, fixed[a:e.pos + 40].replace("\n", " "))) from None
 
 
+def partial_piece(text):
+    """Оборванный ответ (модель не дописала JSON или сократила его «...»): заголовок и все ЦЕЛЫЕ такты до обрыва.
+    Возвращает (piece, число тактов) или (None, 0)."""
+    i = text.find('"bars"')
+    if i < 0:
+        return None, 0
+    j = text.find("[", i)
+    dec, bars, pos = json.JSONDecoder(), [], j + 1
+    while j >= 0:
+        while pos < len(text) and text[pos] in " \t\r\n,":
+            pos += 1
+        try:
+            obj, pos = dec.raw_decode(text, pos)
+        except ValueError:
+            break
+        if not isinstance(obj, dict):
+            break
+        bars.append(obj)
+    if not bars:
+        return None, 0
+    head = {}
+    for k in ("title", "key", "time", "pedal"):
+        m = re.search(r'"%s"\s*:\s*"([^"]*)"' % k, text)
+        if m:
+            head[k] = m.group(1)
+    m = re.search(r'"tempo"\s*:\s*(\d+)', text)
+    if m:
+        head["tempo"] = int(m.group(1))
+    head["bars"] = bars
+    return head, len(bars)
+
+
+def _continue(call, provider, model, api_key, user, piece, want, rec):
+    """Дописать оборванную пьесу: модель получает уже написанные такты и пишет следующие."""
+    for _ in range(CONT_MAX):
+        n = len(piece["bars"])
+        if n >= want:
+            break
+        ask = (user + "\n\nYour previous answer stopped after bar %d of %d (it was cut off). Bars 1-%d are below; "
+               "do NOT repeat them. Continue the SAME piece (same key, style, motifs, plan of sections) and write ONLY "
+               "bars %d-%d as one JSON object {\"bars\": [...]}. Never abbreviate, never write '...'.\n"
+               "Already written:\n%s" % (n, want, n, n + 1, want, json.dumps(piece["bars"], ensure_ascii=False,
+                                                                          separators=(",", ":"))))
+        text = call(provider, model, api_key, SYSTEM, ask)
+        rec["continued"] = rec.get("continued", 0) + 1
+        try:
+            more = parse_piece(text)[0].get("bars") or []
+        except Exception:
+            more = (partial_piece(text)[0] or {}).get("bars") or []
+        if not more:
+            break
+        piece["bars"].extend(more[: want - n])
+    return piece
+
+
 def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, provider=None, model=None,
             api_key=None, call=None, out_dir=None):
     """Сочинить пьесу. Возвращает словарь: midi (путь), piece (JSON), info, fixes, serious, minor, rounds (что
@@ -349,7 +406,20 @@ def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, pr
         text = call(provider, model, api_key, SYSTEM, user)
         rec = {"round": r + 1}
         try:
-            piece, repaired = parse_piece(text)
+            try:
+                piece, repaired = parse_piece(text)
+            except Exception as e0:
+                piece, got = partial_piece(text)
+                if not piece or got >= bars:
+                    raise
+                stop = llm_planner.LAST_STOP[0]
+                rec["cut_after"] = got
+                piece = _continue(call, provider, model, api_key, user, piece, bars, rec)
+                repaired = ["ответ модели оборвался после такта %d%s; остальные такты дописаны отдельным запросом "
+                            "(%d)" % (got, " (предел длины ответа)" if stop in ("max_tokens", "length") else "",
+                                      rec.get("continued", 0))]
+                if len(piece["bars"]) < bars:
+                    repaired.append("дописать удалось только до такта %d" % len(piece["bars"]))
             path = os.path.join(out_dir, "piece_%d.mid" % (r + 1))
             info, fixes = to_midi(piece, path)
             fixes = ["в ответе модели: " + x for x in repaired] + fixes
@@ -359,7 +429,9 @@ def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, pr
             if best is None or len(serious) < len(best["serious"]):
                 best = cand
         except Exception as e:
-            rec.update(ok=False, error="%s: %s" % (type(e).__name__, e), answer=text[:600])
+            rec.update(ok=False, error="%s: %s (длина ответа %d знаков, причина конца: %s; конец ответа: …%s)" % (
+                type(e).__name__, e, len(text or ""), llm_planner.LAST_STOP[0], (text or "")[-120:].replace("\n", " ")),
+                answer=text[:600])
             serious = ["Your answer is not valid JSON (%s). Send ONLY the JSON object; durations as decimal numbers "
                        "(0.333 for a triplet eighth, never 1/3); no comments." % e]
         rounds.append(rec)

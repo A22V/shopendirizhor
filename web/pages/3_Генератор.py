@@ -168,7 +168,7 @@ if r:
                 st.write("• " + m)
             for f in r["fixes"]:
                 st.write("• исправлено: " + f)
-    st.caption("Запросов к модели: %d; ответила модель: %s." % (len(r["rounds"]), ", ".join(r.get("served") or ["?"])))
+    st.caption("Запросов к модели: %d; ответила модель: %s." % (sum(1 + x.get("continued", 0) for x in r["rounds"]), ", ".join(r.get("served") or ["?"])))
     fname = "%s.mid" % (inf["title"] or "Пьеса").replace("/", "_")[:60]
     st.download_button("Скачать пьесу (MIDI)", r["data"], file_name=fname, mime="audio/midi", use_container_width=True)
     if st.button("🎲 Ещё вариант (платный запрос)", disabled=not READY, use_container_width=True, key="gen_more"):

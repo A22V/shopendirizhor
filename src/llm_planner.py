@@ -68,6 +68,7 @@ def extract_text(provider, data):
     raise ValueError(provider)
 
 
+LAST_STOP = [None]   # почему модель закончила ответ (max_tokens = оборван по пределу длины)
 MODELS_SERVED = []   # какое имя модели вернул сам сервис в ответе (проверка, что работает именно выбранная модель)
 
 
@@ -83,6 +84,10 @@ def call_model(provider, model, api_key, system, user, timeout=120):
         MODELS_SERVED.append(str(data.get("model") or data.get("modelVersion") or "?"))
     except Exception:
         pass
+    try:
+        LAST_STOP[0] = data.get("stop_reason") or (data.get("choices") or [{}])[0].get("finish_reason")
+    except Exception:
+        LAST_STOP[0] = None
     return extract_text(provider, data)
 
 

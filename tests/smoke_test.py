@@ -857,6 +857,13 @@ try:
     ok = ok and any("Ритм" in x for x in composer.check(_mi, [], _pm + "2.mid", 8)[0])     # однообразный ритм (12.83)
     ok = ok and composer.template_params(composer.TEMPLATE) == {"bars": 32, "key": "ре минор", "time": "3/4", "tempo": 66} \
         and composer.template_params("вальс") == {}      # шаблон запроса (12.84)
+    _cut = _json.dumps({"title": "t", "key": "A minor", "time": "3/4", "tempo": 120, "bars": _bars})
+    _cut = _cut[:_cut.index('"bars"')] + '"bars":[' + ",".join(_json.dumps(b) for b in _bars[:3]) + ", ... (same)"
+    _cc = []
+    def _fake2(p, m, k, sy, us):      # оборванный ответ (12.87): дописать с такта 4
+        _cc.append(us); return _cut if len(_cc) == 1 else _json.dumps({"bars": _bars[3:]})
+    _r2 = composer.compose("вальс", bars=8, provider="claude", model="x", api_key="k", call=_fake2)
+    ok = ok and _r2["info"]["bars"] == 8 and len(_cc) == 2 and "stopped after bar 3" in _cc[1]
     print("%-30s %s  запросов %d, тактов %d, гамма %.0f%%" % ("генератор пьес", "OK " if ok else "FAIL", len(_calls),
           _r["info"]["bars"], 100 * (_r["info"]["scale_share"] or 0)))
     failed += 0 if ok else 1
