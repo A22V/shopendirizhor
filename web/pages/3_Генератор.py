@@ -3,11 +3,12 @@
 Модель сочиняет фортепиано; оркестр, ансамбль или солиста делает основная программа — кнопка «Отправить».
 Каждое нажатие «Сочинить» / «Ещё вариант» — платный запрос к модели из Secrets (PLANNER_PROVIDER / PLANNER_MODEL).
 """
-import os, sys, traceback
+import os, sys, time, traceback
 import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import common                     # noqa: E402  (первым: секреты → окружение)
+import jobs                       # noqa: E402
 import composer, audio_tools, llm_planner   # noqa: E402,E401
 
 st.set_page_config(page_title="Генератор пьес", page_icon="✒️", layout="centered")
@@ -61,32 +62,92 @@ if not TPL:     # при шаблоне поля скрыты: всё берёт
         tempo = st.selectbox("Темп (четвертей в минуту)", [AUTO, 60, 72, 84, 96, 108, 120, 138], key="gen_tempo")
 
 
-def _compose(variant):
-    with st.spinner("Модель сочиняет (обычно 20–60 секунд)..."):
+def _work(req, tpl, bars, key, meter, tempo, variant):
+    """Сочинение в фоне на сервере (web/jobs.py): не теряется, если на телефоне погас экран."""
+    def fn(prog, work):
+        prog.go("compose")
+        if tpl:     # шаблон: тактов, тональность, размер и темп — из [Паспорт]
+            r = composer.compose(req, bars=tpl.get("bars") or bars, key=tpl.get("key"), time_sig=tpl.get("time"),
+                                 tempo=tpl.get("tempo"), variant=variant, out_dir=work)
+        else:
+            r = composer.compose(req, bars=bars, key=key or None, time_sig=None if meter == AUTO else meter,
+                                 tempo=None if tempo == AUTO else int(tempo), variant=variant, out_dir=work)
+        prog.go("mp3")
         try:
-            if TPL:     # шаблон: тактов, тональность, размер и темп — из [Паспорт]
-                r = composer.compose(req, bars=TPL.get("bars") or bars, key=TPL.get("key"), time_sig=TPL.get("time"),
-                                     tempo=TPL.get("tempo"), variant=variant)
-            else:
-                r = composer.compose(req, bars=bars, key=key.strip() or None,
-                                     time_sig=None if meter == AUTO else meter,
-                                     tempo=None if tempo == AUTO else int(tempo), variant=variant)
-            try:
-                r["mp3"] = open(audio_tools.render_mp3(r["midi"], os.path.splitext(r["midi"])[0] + ".mp3"), "rb").read()
-            except Exception:
-                r["mp3"] = None
-            r["data"] = open(r["midi"], "rb").read()
-            r["request"], r["variant"] = req, variant
-            st.session_state["gen_res"] = r
-        except Exception as e:
-            st.error("Не получилось сочинить пьесу: %s" % e)
-            with st.expander("Подробности для разработчика"):
-                st.code(traceback.format_exc())
+            r["mp3"] = open(audio_tools.render_mp3(r["midi"], os.path.splitext(r["midi"])[0] + ".mp3"), "rb").read()
+        except Exception:
+            r["mp3"] = None
+        r["data"] = open(r["midi"], "rb").read()
+        r["request"], r["variant"] = req, variant
+        return r
+    return fn
+
+
+def _compose(variant):
+    # каждое нажатие — новый платный запрос, поэтому в номер задания входит время нажатия
+    params = {"gen": True, "tpl": TPL, "bars": bars, "key": key.strip(), "meter": meter, "tempo": tempo,
+              "variant": variant, "t": time.time()}
+    jk = jobs.key(req.encode("utf-8"), params)
+    jobs.start(jk, _work(req, TPL, bars, key.strip(), meter, tempo, variant),
+               [("compose", "модель сочиняет"), ("mp3", "запись MP3")], 60.0)
+    st.session_state["gen_job"], st.session_state["gen_res"] = jk, None
+    try:
+        st.query_params["gen"] = jk
+    except Exception:
+        pass
+
+
+@st.fragment(run_every=3)
+def _gen_progress(jk):
+    js = jobs.status(jk)
+    if js is None or js.get("state") in ("done", "error") or not jobs.alive(jk):
+        st.rerun()
+    sec = int(time.time() - float(js.get("started") or time.time()))
+    st.info("%s… прошло %d:%02d. Сочинение идёт на сервере: можно погасить экран или уйти в другое приложение — "
+            "когда вернётесь, пьеса будет здесь." % (
+                "Модель сочиняет" if js.get("step") == "compose" else "Записываю MP3", sec // 60, sec % 60))
 
 
 if st.button("✒️ Сочинить (платный запрос)", disabled=not READY or not req.strip(), use_container_width=True, key="gen_go"):
     st.session_state["gen_n"] = st.session_state.get("gen_n", 0) + 1
     _compose(st.session_state["gen_n"])
+
+# фоновое задание: показать ход или забрать готовую пьесу (и после возвращения на страницу)
+try:
+    _qp = st.query_params.get("gen")
+except Exception:
+    _qp = None
+_gj = st.session_state.get("gen_job") or (_qp if isinstance(_qp, str) else None)
+if _gj and st.session_state.get("gen_loaded") != _gj:
+    _js = jobs.status(_gj)
+
+    def _drop():
+        st.session_state["gen_job"] = None
+        try:
+            del st.query_params["gen"]
+        except Exception:
+            pass
+    if _js is None:
+        st.info("Прежнее сочинение уже не хранится на сервере (прошло больше 6 часов или приложение перезапускалось).")
+        _drop()
+    elif _js.get("state") == "done":
+        try:
+            st.session_state["gen_res"] = jobs.load(_gj)
+            st.session_state["gen_loaded"] = _gj
+        except Exception:
+            st.error("Готовую пьесу не удалось прочитать. Сочините ещё раз.")
+            _drop()
+    elif _js.get("state") == "error":
+        _err = _js.get("error", "")
+        st.error("Не получилось сочинить пьесу: %s" % (_err.strip().splitlines() or ["?"])[-1])
+        with st.expander("Подробности для разработчика"):
+            st.code(_err)
+        _drop()
+    elif not jobs.alive(_gj):
+        st.warning("Сочинение прервалось: сервер перезапускался во время работы. Нажмите «Сочинить» ещё раз.")
+        _drop()
+    else:
+        _gen_progress(_gj)
 
 r = st.session_state.get("gen_res")
 if r:
