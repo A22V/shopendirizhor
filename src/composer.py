@@ -22,6 +22,7 @@ import llm_planner
 MAX_ROUNDS = 2          # запросов к модели на одну пьесу (второй — только если первая попытка с серьёзными замечаниями)
 TPB = 480
 DYN = {"pp": 36, "p": 46, "mp": 58, "mf": 70, "f": 84, "ff": 98}        # эвристика
+SAME_RHYTHM_MAX, SHORT_MIN = 0.4, 0.15   # эвристика: «однообразно», если один ритм в > 40% тактов или коротких нот < 15%
 MEL_PLUS = 8            # мелодия (правая рука) громче сопровождения — иначе «все перекрикивают» (12.78)
 RH_RANGE, LH_RANGE = (53, 96), (28, 72)                                 # эвристика: удобные регистры рук
 NOTE_RE = re.compile(r"^\s*([A-Ga-g])\s*([#b♯♭]{0,2})\s*(-?\d)\s*$")
@@ -40,8 +41,16 @@ Rules:
    up exactly to the bar length (3/4 -> 3, 4/4 -> 4, 6/8 -> 3).
 2. Right hand: a clear, singable melody (mostly steps, leaps followed by a step back), phrases of 4 or 8 bars with breathing
    points, a climax about two thirds through, a final cadence on the tonic. Right hand mostly between G3 and C7.
+   Rhythm must be varied and alive: mix quarters with eighths, dotted rhythms, ties over the beat or syncopation where the
+   style allows, occasional triplets and short ornaments (passing notes, neighbour notes, appoggiaturas, a turn written
+   out in sixteenths). Do not repeat the same bar rhythm more than twice in a row except in a deliberate sequence; at
+   least a quarter of the melody notes should be shorter than a quarter note. Longer notes at phrase ends.
+   For 16 bars or more give the piece contrast: A section, a B section (other register, other harmony or a related key),
+   and a varied return of A.
 3. Left hand: accompaniment that fits the style (waltz "bass-chord-chord", broken chords, Alberti bass, sustained chords,
-   arpeggios). Left hand mostly between E1 and C5. Bass on strong beats.
+   arpeggios). Left hand mostly between E1 and C5. Bass on strong beats. Do not keep one pattern for the whole piece:
+   change it between sections, and in some bars (before cadences, in the B section) let the bass or an inner voice move
+   as a short counter-melody in eighths or quarters.
 4. Playability: in each hand the notes sounding together span at most 14 semitones and at most 4 notes.
 5. Harmony: stay in the key with clear functional harmony (I, IV, V, ii, vi, secondary dominants allowed); modulate only
    if asked; avoid parallel fifths and octaves between melody and bass.
@@ -156,6 +165,9 @@ def to_midi(piece, path):
             notes = _events(b.get(hand), bar_len, fixes, i + 1, "правая рука" if hand == "rh" else "левая рука")
             if hand == "rh" and not notes:
                 stats["empty_rh"] += 1
+            if hand == "rh":
+                stats.setdefault("rhythms", []).append(tuple(round(d * 4) / 4 for _, d, _ in notes))
+                stats.setdefault("durs", []).extend(d for _, d, _ in notes)
             for off, dur, ps in notes:
                 for p in ps:
                     q = _fold(p, *rng)
@@ -182,6 +194,13 @@ def to_midi(piece, path):
             "title": piece.get("title") or "Пьеса", "seconds": round(len(bars) * bar_len * 60.0 / tempo, 1),
             "notes": len(stats["rh"]) + len(stats["lh"]), "empty_melody_bars": stats["empty_rh"],
             "scale_share": scale_share(stats["rh"] + stats["lh"], _key(piece.get("key")))}
+    rh_bars = [r for r in stats.get("rhythms", []) if r]
+    if rh_bars:
+        import collections
+        info["same_rhythm_share"] = collections.Counter(rh_bars).most_common(1)[0][1] / len(rh_bars)
+    durs = stats.get("durs", [])
+    if durs:
+        info["short_share"] = sum(1 for d in durs if d < 0.99) / len(durs)
     return info, fixes
 
 
@@ -230,6 +249,11 @@ def check(info, fixes, midi_path, want_bars):
         serious.append("Слишком коротко: %d тактов." % info["bars"])
     if info["empty_melody_bars"] > max(1, info["bars"] // 8):
         serious.append("В %d тактах у правой руки нет нот (нет мелодии)." % info["empty_melody_bars"])
+    same, short = info.get("same_rhythm_share"), info.get("short_share")
+    if same is not None and info["bars"] >= 8 and (same > SAME_RHYTHM_MAX or (short is not None and short < SHORT_MIN)):
+        serious.append("Ритм мелодии однообразный: один и тот же ритм в %.0f%% тактов, нот короче четверти %.0f%%. "
+                       "Разнообразьте ритм (восьмые, пунктир, синкопы, украшения), сохранив мелодию и гармонию."
+                       % (100 * same, 100 * (short or 0)))
     sh = info.get("scale_share")
     if sh is not None and sh < 0.85:
         minor.append("В гамме %s только %.0f%% нот (много случайных знаков)." % (info.get("key"), 100 * sh))
