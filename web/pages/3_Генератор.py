@@ -66,12 +66,14 @@ def _work(req, tpl, bars, key, meter, tempo, variant):
     """Сочинение в фоне на сервере (web/jobs.py): не теряется, если на телефоне погас экран."""
     def fn(prog, work):
         prog.go("compose")
+        n0 = len(llm_planner.USAGE)
         if tpl:     # шаблон: тактов, тональность, размер и темп — из [Паспорт]
             r = composer.compose(req, bars=tpl.get("bars") or bars, key=tpl.get("key"), time_sig=tpl.get("time"),
                                  tempo=tpl.get("tempo"), variant=variant, out_dir=work)
         else:
             r = composer.compose(req, bars=bars, key=key or None, time_sig=None if meter == AUTO else meter,
                                  tempo=None if tempo == AUTO else int(tempo), variant=variant, out_dir=work)
+        r["usage"] = llm_planner.USAGE[n0:]
         prog.go("mp3")
         try:
             r["mp3"] = open(audio_tools.render_mp3(r["midi"], os.path.splitext(r["midi"])[0] + ".mp3"), "rb").read()
@@ -169,6 +171,13 @@ if r:
             for f in r["fixes"]:
                 st.write("• исправлено: " + f)
     st.caption("Запросов к модели: %d; ответила модель: %s." % (sum(1 + x.get("continued", 0) for x in r["rounds"]), ", ".join(r.get("served") or ["?"])))
+    _u = r.get("usage") or []
+    if _u:
+        st.caption("Токены: вход %d (из них прочитано из кэша %d, записано в кэш %d), выход %d (вместе с размышлениями "
+                   "модели; выход стоит дороже входа)." % (
+                       sum(x["input_tokens"] + x["cache_read_input_tokens"] + x["cache_creation_input_tokens"] for x in _u),
+                       sum(x["cache_read_input_tokens"] for x in _u), sum(x["cache_creation_input_tokens"] for x in _u),
+                       sum(x["output_tokens"] for x in _u)))
     fname = "%s.mid" % (inf["title"] or "Пьеса").replace("/", "_")[:60]
     st.download_button("Скачать пьесу (MIDI)", r["data"], file_name=fname, mime="audio/midi", use_container_width=True)
     if st.button("🎲 Ещё вариант (платный запрос)", disabled=not READY, use_container_width=True, key="gen_more"):

@@ -47,7 +47,10 @@ def build_request(provider, model, api_key, system, user, max_tokens=16000, extr
         url = ENDPOINTS[provider]
         headers = {"Content-Type": "application/json", "x-api-key": api_key,
                    "anthropic-version": "2023-06-01"}
-        body = {"model": model, "max_tokens": max_tokens, "system": system,
+        # кэш задания (2026-11-22): одинаковое задание при повторных запросах читается из кэша по 0,1 цены входа;
+        # запись в кэш 1,25 цены, живёт 5 минут; задание короче минимума (Haiku 5.5: 512 токенов) просто не кэшируется
+        body = {"model": model, "max_tokens": max_tokens,
+                "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
                 "messages": [{"role": "user", "content": user}]}
         body.update(extra or {})
     elif provider == "gemini":
@@ -72,6 +75,7 @@ def extract_text(provider, data):
 
 
 LAST_STOP = [None]   # почему модель закончила ответ (max_tokens = оборван по пределу длины)
+USAGE = []          # токены по запросам: вход, выход, записано в кэш, прочитано из кэша (Claude)
 MODELS_SERVED = []   # какое имя модели вернул сам сервис в ответе (проверка, что работает именно выбранная модель)
 
 
@@ -85,6 +89,13 @@ def call_model(provider, model, api_key, system, user, timeout=120, max_tokens=1
         raise RuntimeError("%s returned HTTP %s: %s" % (provider, e.code, e.read()[:300]))
     try:
         MODELS_SERVED.append(str(data.get("model") or data.get("modelVersion") or "?"))
+    except Exception:
+        pass
+    try:
+        u = data.get("usage") or {}
+        if u:
+            USAGE.append({k: int(u.get(k) or 0) for k in ("input_tokens", "output_tokens",
+                                                          "cache_creation_input_tokens", "cache_read_input_tokens")})
     except Exception:
         pass
     try:
