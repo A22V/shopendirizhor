@@ -67,7 +67,11 @@ Rules:
    notes and rests, the tempo itself stays fixed); obey every line of [Запреты]. Use the motif from [Зерно].
    Lines of lyrics inside a section are NOT sung: use their syllables and word stresses as a rhythm guide for the melody
    (about one note per syllable, stressed syllables on strong beats or longer notes).
-   Instrument, voice and sound-design words describe the mood only: you still write for solo piano."""
+   Instrument, voice and sound-design words describe the mood only: you still write for solo piano.
+9. Optional per bar "rh2": a second right-hand layer UNDER the melody (inner figuration, e.g. triplet broken chords while
+   the melody holds a note), same format as "rh", its durations also add up to the bar. Use it only when the request asks
+   for two layers in the right hand; then "rh" is the melody alone. Melody and "rh2" sounding together must still fit
+   one hand (at most 14 semitones, at most 4 notes)."""
 
 
 def _pitch(name):
@@ -175,19 +179,21 @@ def to_midi(piece, path):
             start = i * bar_len
             vel = DYN.get(str(b.get("dyn", "mp")).lower(), DYN["mp"]) + (MEL_PLUS if hand == "rh" else 0)
             notes = _events(b.get(hand), bar_len, fixes, i + 1, "правая рука" if hand == "rh" else "левая рука")
+            inner = _events(b.get("rh2"), bar_len, fixes, i + 1, "правая рука, второй слой") if (
+                hand == "rh" and b.get("rh2")) else []
             if hand == "rh" and not notes:
                 stats["empty_rh"] += 1
             if hand == "rh":
                 stats.setdefault("rhythms", []).append(tuple(round(d * 4) / 4 for _, d, _ in notes))
                 stats.setdefault("durs", []).extend(d for _, d, _ in notes)
-            for off, dur, ps in notes:
+            for off, dur, ps, vv in [n + (vel,) for n in notes] + [n + (vel - MEL_PLUS,) for n in inner]:
                 for p in ps:
                     q = _fold(p, *rng)
                     if q != p:
                         stats["folded"] += 1
                     stats[hand].append(q)
                     s, e = int(round((start + off) * TPB)), int(round((start + off + dur) * TPB))
-                    ev.append((s, 1, mido.Message("note_on", note=q, velocity=max(1, min(127, vel)), channel=0)))
+                    ev.append((s, 1, mido.Message("note_on", note=q, velocity=max(1, min(127, vv)), channel=0)))
                     ev.append((max(s + 1, e - 1), 0, mido.Message("note_off", note=q, velocity=0, channel=0)))
             if pedal and hand == "lh":
                 s = int(round(start * TPB))
@@ -252,7 +258,7 @@ def parallels(midi_path):
     return out
 
 
-def check(info, fixes, midi_path, want_bars):
+def check(info, fixes, midi_path, want_bars, skip_rhythm=False):
     """Замечания к пьесе: (серьёзные, мелкие). Серьёзные уходят модели на переписывание."""
     serious, minor = [], []
     if want_bars and info["bars"] != want_bars:
@@ -262,7 +268,7 @@ def check(info, fixes, midi_path, want_bars):
     if info["empty_melody_bars"] > max(1, info["bars"] // 8):
         serious.append("В %d тактах у правой руки нет нот (нет мелодии)." % info["empty_melody_bars"])
     same, short = info.get("same_rhythm_share"), info.get("short_share")
-    if same is not None and info["bars"] >= 8 and (same > SAME_RHYTHM_MAX or (short is not None and short < SHORT_MIN)):
+    if same is not None and info["bars"] >= 8 and not skip_rhythm and (same > SAME_RHYTHM_MAX or (short is not None and short < SHORT_MIN)):
         serious.append("Ритм мелодии однообразный: один и тот же ритм в %.0f%% тактов, нот короче четверти %.0f%%. "
                        "Разнообразьте ритм (восьмые, пунктир, синкопы, украшения), сохранив мелодию и гармонию."
                        % (100 * same, 100 * (short or 0)))
@@ -391,8 +397,9 @@ def _continue(call, provider, model, api_key, user, piece, want, rec):
 
 
 def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, provider=None, model=None,
-            api_key=None, call=None, out_dir=None):
-    """Сочинить пьесу. Возвращает словарь: midi (путь), piece (JSON), info, fixes, serious, minor, rounds (что
+            api_key=None, call=None, out_dir=None, extra_check=None, skip_rhythm=False):
+    """Сочинить пьесу. extra_check(midi) -> (сведения, серьёзные, мелкие) — дополнительная проверка (похожесть на
+    образец); skip_rhythm — не требовать «живого» ритма (образец сам спокойный, как «Лунная»). Возвращает словарь: midi (путь), piece (JSON), info, fixes, serious, minor, rounds (что
     отвечала модель), served (имя модели из ответа сервиса). Исключение — если ни одна попытка не дала нот."""
     if not (provider and api_key and model):
         provider, api_key, model = llm_planner.configured_provider()
@@ -430,9 +437,17 @@ def compose(request, bars=16, key=None, time_sig=None, tempo=None, variant=1, pr
             path = os.path.join(out_dir, "piece_%d.mid" % (r + 1))
             info, fixes = to_midi(piece, path)
             fixes = ["в ответе модели: " + x for x in repaired] + fixes
-            serious, minor = check(info, fixes, path, bars)
+            serious, minor = check(info, fixes, path, bars, skip_rhythm=skip_rhythm)
+            extra = None
+            if extra_check:
+                try:
+                    extra, s2, m2 = extra_check(path)
+                    serious, minor = serious + s2, minor + m2
+                except Exception as e:
+                    minor = minor + ["Дополнительная проверка не выполнилась: %s" % e]
             rec.update(ok=True, serious=serious, minor=minor)
-            cand = {"midi": path, "piece": piece, "info": info, "fixes": fixes, "serious": serious, "minor": minor}
+            cand = {"midi": path, "piece": piece, "info": info, "fixes": fixes, "serious": serious, "minor": minor,
+                    "extra": extra}
             if best is None or len(serious) < len(best["serious"]):
                 best = cand
         except Exception as e:

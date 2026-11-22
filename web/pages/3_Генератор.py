@@ -9,7 +9,7 @@ import streamlit as st
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import common                     # noqa: E402  (первым: секреты → окружение)
 import jobs                       # noqa: E402
-import composer, audio_tools, llm_planner   # noqa: E402,E401
+import composer, audio_tools, llm_planner, style_analyze   # noqa: E402,E401
 
 st.set_page_config(page_title="Генератор пьес", page_icon="✒️", layout="centered")
 common.decorate("Генератор", "фортепианная пьеса по вашему описанию")
@@ -38,6 +38,46 @@ def _put_template():
     st.session_state["gen_req"] = composer.TEMPLATE
 
 
+def _put_style(data, name, n_bars):
+    """Разбор образца -> шаблон в окне запроса; сам образец остаётся в сессии для проверки похожести."""
+    import tempfile
+    p = os.path.join(tempfile.mkdtemp(prefix="style_"), "ref.mid")
+    open(p, "wb").write(data)
+    title = os.path.splitext(name)[0].replace("_", " ")
+    try:
+        res = style_analyze.analyze(p, title)
+    except Exception as e:
+        st.session_state["gen_style_err"] = "%s: %s" % (type(e).__name__, e)
+        return
+    st.session_state["gen_req"] = style_analyze.template(res, n_bars)
+    st.session_state["gen_ref"] = {"name": name, "title": title, "data": data, "bars": res["bars"],
+                                   "key": style_analyze.key_text(res), "calm": res["rhythm_calm"]}
+    st.session_state.pop("gen_style_err", None)
+
+
+def _drop_style():
+    st.session_state.pop("gen_ref", None)
+
+
+with st.expander("🎼 Сочинить в стиле известной пьесы (по образцу)", expanded=bool(st.session_state.get("gen_ref"))):
+    st.caption("Загрузите пьесу для фортепиано (MIDI или MusicXML). Программа сама, без модели и бесплатно, разберёт её "
+               "«почерк»: тональность, темп, форму, аккорды, ритм мелодии, фактуру — и напишет шаблон. Модель получит "
+               "только это описание, а не ноты образца, и сочинит новую пьесу. Потом программа проверит, что мелодия и "
+               "аккорды не списаны с образца.")
+    ref_f = common.checked_midi(common.any_file("Образец: MIDI или MusicXML", "gen_ref_file"), "Образец")
+    sb = st.selectbox("Длина новой пьесы (тактов)", [8, 16, 24, 32, 48], index=2, key="gen_style_bars")
+    if ref_f is not None:
+        st.button("🔍 Разобрать образец и написать шаблон", on_click=_put_style,
+                  args=(ref_f.getvalue(), ref_f.name, sb), use_container_width=True, key="gen_style_go")
+    if st.session_state.get("gen_style_err"):
+        st.error("Образец не удалось разобрать: " + st.session_state["gen_style_err"])
+    _ref = st.session_state.get("gen_ref")
+    if _ref:
+        st.success("Образец «%s» разобран: %d тактов, %s. Шаблон — в окне ниже, его можно поправить." % (
+            _ref["title"], _ref["bars"], _ref["key"]))
+        st.button("Убрать образец (не проверять похожесть)", on_click=_drop_style, key="gen_style_drop")
+
+
 st.button("📋 Вставить пример шаблона", on_click=_put_template, key="gen_tpl",
           help="Шаблон с паспортом, разделами по тактам, аккордами и запретами. Замените своё и сочиняйте.")
 req = st.text_area("Что сочинить", key="gen_req", height=220,
@@ -62,17 +102,25 @@ if not TPL:     # при шаблоне поля скрыты: всё берёт
         tempo = st.selectbox("Темп (четвертей в минуту)", [AUTO, 60, 72, 84, 96, 108, 120, 138], key="gen_tempo")
 
 
-def _work(req, tpl, bars, key, meter, tempo, variant):
-    """Сочинение в фоне на сервере (web/jobs.py): не теряется, если на телефоне погас экран."""
+def _work(req, tpl, bars, key, meter, tempo, variant, ref=None):
+    """Сочинение в фоне на сервере (web/jobs.py): не теряется, если на телефоне погас экран.
+    ref — образец (данные MIDI): новая пьеса проверяется на похожесть, найденные заимствования уходят модели."""
     def fn(prog, work):
         prog.go("compose")
         n0 = len(llm_planner.USAGE)
+        kw = {}
+        if ref:
+            rp = os.path.join(work, "ref.mid")
+            open(rp, "wb").write(ref["data"])
+            rres = style_analyze.analyze(rp, ref["title"])
+            kw = {"extra_check": lambda m: style_analyze.similarity(rres, m), "skip_rhythm": bool(ref.get("calm"))}
         if tpl:     # шаблон: тактов, тональность, размер и темп — из [Паспорт]
             r = composer.compose(req, bars=tpl.get("bars") or bars, key=tpl.get("key"), time_sig=tpl.get("time"),
-                                 tempo=tpl.get("tempo"), variant=variant, out_dir=work)
+                                 tempo=tpl.get("tempo"), variant=variant, out_dir=work, **kw)
         else:
             r = composer.compose(req, bars=bars, key=key or None, time_sig=None if meter == AUTO else meter,
-                                 tempo=None if tempo == AUTO else int(tempo), variant=variant, out_dir=work)
+                                 tempo=None if tempo == AUTO else int(tempo), variant=variant, out_dir=work, **kw)
+        r["ref_title"] = ref["title"] if ref else None
         r["usage"] = llm_planner.USAGE[n0:]
         prog.go("mp3")
         try:
@@ -87,10 +135,11 @@ def _work(req, tpl, bars, key, meter, tempo, variant):
 
 def _compose(variant):
     # каждое нажатие — новый платный запрос, поэтому в номер задания входит время нажатия
+    ref = st.session_state.get("gen_ref")
     params = {"gen": True, "tpl": TPL, "bars": bars, "key": key.strip(), "meter": meter, "tempo": tempo,
-              "variant": variant, "t": time.time()}
+              "variant": variant, "t": time.time(), "ref": ref["name"] if ref else None}
     jk = jobs.key(req.encode("utf-8"), params)
-    jobs.start(jk, _work(req, TPL, bars, key.strip(), meter, tempo, variant),
+    jobs.start(jk, _work(req, TPL, bars, key.strip(), meter, tempo, variant, ref),
                [("compose", "модель сочиняет"), ("mp3", "запись MP3")], 60.0)
     st.session_state["gen_job"], st.session_state["gen_res"] = jk, None
     try:
@@ -164,6 +213,10 @@ if r:
     else:
         st.success("Проверка: такты, тональность и руки пианиста в порядке." if not r["minor"] else
                    "Проверка: серьёзных замечаний нет (мелкие ниже).")
+    if r.get("extra"):
+        (st.warning if r["extra"]["melody_run"] >= style_analyze.MEL_RUN_MAX or
+         r["extra"]["chord_run"] >= style_analyze.CHORD_RUN_MAX else st.info)(
+            "Образец «%s». %s" % (r.get("ref_title") or "?", style_analyze.similarity_text(r["extra"])))
     if r["minor"] or r["fixes"]:
         with st.expander("Мелкие замечания и что программа поправила"):
             for m in r["minor"]:

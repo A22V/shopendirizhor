@@ -869,5 +869,38 @@ try:
     failed += 0 if ok else 1
 except Exception:
     print("генератор пьес FAIL (исключение)"); traceback.print_exc(); failed += 1
+# генератор: сочинить в стиле образца (src/style_analyze.py, 2026-11-22): разбор, шаблон, проверка похожести, rh2
+try:
+    import style_analyze, mido as _mido
+    _ref = style_analyze.analyze(_r["midi"], "образец")
+    _tpl = style_analyze.template(_ref, 8)
+    _tp = composer.template_params(_tpl)
+    _cp = _r["midi"] + ".copy.mid"            # тот же образец на большую секунду выше: заимствование ловится
+    _m = _mido.MidiFile(_r["midi"])
+    for _t in _m.tracks:
+        for _x in _t:
+            if _x.type in ("note_on", "note_off"):
+                _x.note += 2
+    _m.save(_cp)
+    _sim, _ser, _ = style_analyze.similarity(_ref, _cp)
+    _ans3 = [_json.dumps({"title": "t", "key": "A minor", "time": "3/4", "tempo": 120, "bars": _bars}),
+             _json.dumps({"title": "t", "key": "A minor", "time": "3/4", "tempo": 120, "bars": _bars[::-1]})]
+    _c3 = []
+    def _fake3(p, m, k, sy, us):
+        _c3.append(us); return _ans3[min(len(_c3) - 1, 1)]
+    _r3 = composer.compose(_tpl, bars=8, provider="claude", model="x", api_key="k", call=_fake3,
+                           extra_check=lambda mm: style_analyze.similarity(_ref, mm), skip_rhythm=True)
+    _two = composer.to_midi({"time": "3/4", "bars": [{"rh": [["A4", 3]], "rh2": [["C4", 1], ["E4", 1], ["C4", 1]],
+                                                     "lh": [["A2", 3]]}]}, _cp + ".rh2.mid")[0]
+    ok = (_tp.get("bars") == 8 and _tp.get("time") == "3/4" and "[Запреты]" in _tpl
+          and _sim["melody_run"] >= style_analyze.MEL_RUN_MAX and _ser
+          and len(_c3) == 2 and "copies" in _c3[1] and _r3["extra"]["melody_run"] < style_analyze.MEL_RUN_MAX
+          and _two["notes"] == 5)
+    print("%-30s %s  копия %d нот подряд, новая %d, тональность %s" % (
+        "генератор: стиль образца", "OK " if ok else "FAIL", _sim["melody_run"], _r3["extra"]["melody_run"],
+        style_analyze.key_text(_ref)))
+    failed += 0 if ok else 1
+except Exception:
+    print("генератор: стиль образца FAIL (исключение)"); traceback.print_exc(); failed += 1
 print("\nИТОГ:", "все тесты пройдены" if not failed else "ПРОВАЛЕНО тестов: %d" % failed)
 sys.exit(1 if failed else 0)
