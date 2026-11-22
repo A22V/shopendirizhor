@@ -15,6 +15,32 @@ st.set_page_config(page_title="Генератор пьес", page_icon="✒️",
 common.decorate("Генератор", "фортепианная пьеса по вашему описанию")
 common.nav("Генератор")
 
+def _reset_gen():
+    """«Начать заново» на этой странице: забыть описание, образец, сочинённую пьесу и её задание на сервере.
+    Пьесу, уже отправленную на главную (gen_piece), и файлы главной страницы не трогаем."""
+    j = st.session_state.get("gen_job")
+    try:
+        q = st.query_params.get("gen")
+        j = j or (q if isinstance(q, str) else None)
+    except Exception:
+        pass
+    if j:
+        jobs.forget(j)
+    n = st.session_state.get("gen_reset_n", 0) + 1
+    for k in list(st.session_state.keys()):
+        if (k.startswith("gen_") and k != "gen_piece") or "gen_ref_file" in k:
+            del st.session_state[k]
+    st.session_state["gen_reset_n"] = n           # новая кнопка выбора образца, пустая
+    try:
+        del st.query_params["gen"]
+    except Exception:
+        pass
+
+
+st.button("🧹 Начать заново", on_click=_reset_gen, key="gen_reset_btn",
+          help="Очищает описание, образец и сочинённую пьесу на этой странице; с сервера стирается её задание. "
+               "Пьеса, уже отправленная на главную, и файлы на вашем телефоне не трогаются.")
+
 PROVIDER, KEY, MODEL = llm_planner.configured_provider()
 READY = bool(PROVIDER and KEY and MODEL)
 AUTO = "на выбор модели"
@@ -64,7 +90,7 @@ with st.expander("🎼 Сочинить в стиле известной пье�
                "«почерк»: тональность, темп, форму, аккорды, ритм мелодии, фактуру — и напишет шаблон. Модель получит "
                "только это описание, а не ноты образца, и сочинит новую пьесу. Потом программа проверит, что мелодия и "
                "аккорды не списаны с образца.")
-    ref_f = common.checked_midi(common.any_file("Образец: MIDI или MusicXML", "gen_ref_file"), "Образец")
+    ref_f = common.checked_midi(common.any_file("Образец: MIDI или MusicXML", "gen_ref_file_%d" % st.session_state.get("gen_reset_n", 0)), "Образец")
     sb = st.selectbox("Длина новой пьесы (тактов)", [8, 16, 24, 32, 48], index=2, key="gen_style_bars")
     if ref_f is not None:
         st.button("🔍 Разобрать образец и написать шаблон", on_click=_put_style,
