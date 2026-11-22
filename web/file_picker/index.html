@@ -97,4 +97,10 @@ $("inp").onchange = async () => {
 };
 send("streamlit:componentReady", {apiVersion: 1});
 window.addEventListener("load", height);
+// Внутри свёрнутого раздела окошко измеряет себя, пока невидимо (высота почти 0), и остаётся тонкой полоской
+// (так было в 12.32 и снова 2026-11-22 на «Генераторе»). Пересчитываем высоту при любом изменении размеров,
+// при повороте экрана и на всякий случай первые 10 секунд.
+try { new ResizeObserver(height).observe(document.body); } catch (e) {}
+window.addEventListener("resize", height);
+(function () { let n = 0; const t = setInterval(function () { height(); if (++n >= 20) clearInterval(t); }, 500); })();
 </script></body></html>
